@@ -39,6 +39,7 @@ type CommonConfig struct {
 type AuthOptions struct {
 	RequireAuthn bool
 	BasicRealm   string
+	Keytab       string
 }
 
 // InstallCommonFlags adds command-line options to the top-level flag parser for
@@ -63,4 +64,5 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
 	cmd.Var(opts.NewMapOpts(config.LogConfig.Config, nil), []string{"-log-opt"}, usageFn("Set log driver options"))
 	cmd.BoolVar(&config.AuthOptions.RequireAuthn, []string{"a", "-authn"}, false, usageFn("Require clients to authenticate"))
 	cmd.StringVar(&config.AuthOptions.BasicRealm, []string{"-realm"}, "localhost", usageFn("Realm name to advertise for Basic auth"))
+	cmd.StringVar(&config.AuthOptions.Keytab, []string{"-keytab"}, "", usageFn("Keytab to use for Negotiate auth"))
 }

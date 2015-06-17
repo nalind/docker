@@ -110,6 +110,9 @@ if [ -z "$DOCKER_CLIENTONLY" ]; then
 	; then
 		DOCKER_BUILDTAGS+=' libsasl2'
 	fi
+	if pkg-config krb5-gssapi 2> /dev/null ; then
+		DOCKER_BUILDTAGS+=' gssapi'
+	fi
 fi
 
 if [ "$DOCKER_EXECDRIVER" = 'lxc' ]; then

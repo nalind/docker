@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y \
 	iptables \
 	libapparmor-dev \
 	libcap-dev \
+	libkrb5-dev \
 	libsasl2-dev \
 	libsqlite3-dev \
 	mercurial \

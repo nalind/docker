@@ -103,6 +103,9 @@ unix://[/path/to/socket] to use.
 **--ipv6**=*true*|*false*
   Enable IPv6 support. Default is false. Docker will create an IPv6-enabled bridge with address fe80::1 which will allow you to create IPv6-enabled containers. Use together with `--fixed-cidr-v6` to provide globally routable IPv6 addresses. IPv6 forwarding will be enabled if not used with `--ip-forward=false`. This may collide with your host's current IPv6 settings. For more information please consult the documentation about "Advanced Networking - IPv6".
 
+**--keytab**="FILE:/etc/krb5.keytab"
+  When built with GSSAPI support, use the specified Kerberos keytab when offering and accepting Negotiate authentication to and from clients.  The default is to use the library's default.
+
 **-l**, **--log-level**="*debug*|*info*|*warn*|*error*|*fatal*""
   Set the logging level. Default is `info`.
 
