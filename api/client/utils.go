@@ -29,14 +29,59 @@ import (
 	"github.com/docker/docker/registry"
 )
 
+// AuthResponder is an interface that wraps the Scheme and AuthRespond methods.
+//
+// At initialization time, an implementation of AuthResponder should register
+// itself by calling RegisterAuthResponder.
+type AuthResponder interface {
+	// Scheme should return the name of the authorization scheme for which
+	// the responder should be called.
+	Scheme() string
+	// AuthRespond, given the authentication header value associated with
+	// the scheme that it implements, can decide if the request should be
+	// retried.  If it returns true, then the request is retransmitted to
+	// the server, presumably because it has added an authentication header
+	// which it believes the server will accept.
+	AuthRespond(cli *DockerCli, challenge string, req *http.Request) (bool, error)
+}
+
+// AuthResponderCreator either creates a new AuthResponder, or returns nil
+type AuthResponderCreator func() AuthResponder
+
 var (
-	errConnectionRefused = errors.New("Cannot connect to the Docker daemon. Is 'docker -d' running on this host?")
+	authResponderCreators = []AuthResponderCreator{}
+	errConnectionRefused  = errors.New("Cannot connect to the Docker daemon. Is 'docker -d' running on this host?")
 )
 
 type serverResponse struct {
 	body       io.ReadCloser
 	header     http.Header
 	statusCode int
+}
+
+// RegisterAuthResponder registers a function which will be called at startup
+// to create an AuthResponder.
+func RegisterAuthResponder(arc AuthResponderCreator) {
+	authResponderCreators = append(authResponderCreators, arc)
+}
+
+// Run through all of the registered responder creators and build a map of
+// lists of responders.
+func createAuthResponders() map[string]*[]AuthResponder {
+	ars := make(map[string]*[]AuthResponder)
+	for _, arc := range authResponderCreators {
+		responder := arc()
+		if responder != nil {
+			scheme := responder.Scheme()
+			if ars[scheme] != nil {
+				slice := append(*(ars[scheme]), responder)
+				ars[scheme] = &slice
+			} else {
+				ars[scheme] = &[]AuthResponder{responder}
+			}
+		}
+	}
+	return ars
 }
 
 // HTTPClient creates a new HTTP client with the cli's client transport instance.
@@ -60,12 +105,16 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 		body:       nil,
 		statusCode: -1,
 	}
+	var body bytes.Buffer
 
 	expectedPayload := (method == "POST" || method == "PUT")
 	if expectedPayload && in == nil {
 		in = bytes.NewReader([]byte{})
 	}
-	req, err := http.NewRequest(method, fmt.Sprintf("/v%s%s", api.Version, path), in)
+	if in != nil {
+		io.Copy(&body, in)
+	}
+	req, err := http.NewRequest(method, fmt.Sprintf("/v%s%s", api.Version, path), bytes.NewReader(body.Bytes()))
 	if err != nil {
 		return serverResp, err
 	}
@@ -91,6 +140,39 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 	}
 
 	resp, err := cli.HTTPClient().Do(req)
+	if err == nil && resp.StatusCode == 401 && req.Header.Get("Authorization") == "" {
+		retryWithUpdatedAuthn := false
+		ah := resp.Header[http.CanonicalHeaderKey("WWW-Authenticate")]
+		for _, challenge := range ah {
+			tokens := strings.Split(strings.Replace(challenge, "\t", " ", -1), " ")
+			responders := (*cli.authResponders)[tokens[0]]
+			if responders != nil {
+				for _, responder := range *responders {
+					retryWithUpdatedAuthn, err = responder.AuthRespond(cli, challenge, req)
+					if retryWithUpdatedAuthn {
+						logrus.Debugf("handler for \"%s\" produced data", tokens[0])
+						break
+					} else {
+						logrus.Debugf("handler for \"%s\" failed to produce data", tokens[0])
+					}
+				}
+			} else {
+				logrus.Debugf("no handler for \"%s\"", tokens[0])
+			}
+		}
+		if len(ah) == 0 {
+			err = fmt.Errorf("No authenticators available.")
+		} else if err != nil {
+			err = fmt.Errorf("%v. Unable to authenticate to docker daemon.", err)
+		} else if !retryWithUpdatedAuthn {
+			err = fmt.Errorf("Unable to authenticate to docker daemon.")
+		} else {
+			serverResp, err = cli.clientRequest(method, path, &body, req.Header)
+			resp.Body = serverResp.body
+			resp.Header = serverResp.header
+			resp.StatusCode = serverResp.statusCode
+		}
+	}
 	if resp != nil {
 		serverResp.statusCode = resp.StatusCode
 	}

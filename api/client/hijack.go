@@ -1,10 +1,12 @@
 package client
 
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -138,6 +140,7 @@ func (cli *DockerCli) hijack(method, path string, setRawTerminal bool, in io.Rea
 	if err != nil {
 		return err
 	}
+	reParams := bytes.NewBuffer(params.Bytes())
 	req, err := http.NewRequest(method, fmt.Sprintf("/v%s%s", api.Version, path), params)
 	if err != nil {
 		return err
@@ -175,7 +178,46 @@ func (cli *DockerCli) hijack(method, path string, setRawTerminal bool, in io.Rea
 	defer clientconn.Close()
 
 	// Server hijacks the connection, error 'connection closed' expected
-	clientconn.Do(req)
+	resp, err := clientconn.Do(req)
+	if err == nil && resp.StatusCode == 401 && req.Header.Get("Authorization") == "" {
+		retryWithUpdatedAuthn := false
+		ah := resp.Header[http.CanonicalHeaderKey("WWW-Authenticate")]
+		for _, challenge := range ah {
+			tokens := strings.Split(strings.Replace(challenge, "\t", " ", -1), " ")
+			responders := (*cli.authResponders)[tokens[0]]
+			if responders != nil {
+				for _, responder := range *responders {
+					retryWithUpdatedAuthn, err = responder.AuthRespond(cli, challenge, req)
+					if retryWithUpdatedAuthn {
+						logrus.Debugf("handler for \"%s\" produced data", tokens[0])
+						break
+					} else {
+						logrus.Debugf("handler for \"%s\" failed to produce data", tokens[0])
+					}
+				}
+			} else {
+				logrus.Debugf("no handler for \"%s\"", tokens[0])
+			}
+		}
+		if len(ah) == 0 {
+			err = fmt.Errorf("No authenticators available.")
+		} else if err != nil {
+			err = fmt.Errorf("%v. Unable to authenticate to docker daemon.", err)
+		} else if !retryWithUpdatedAuthn {
+			err = fmt.Errorf("Unable to authenticate to docker daemon.")
+		} else {
+			req.Body = ioutil.NopCloser(reParams)
+			resp, err = clientconn.Do(req)
+		}
+	}
+	if resp.StatusCode != 101 {
+		logrus.Debugf("[hijack] Error %d hijacking", resp.StatusCode)
+		if err != nil {
+			return err
+		} else {
+			return fmt.Errorf("Error hijacking connection to the Docker daemon (expected status 101, got %d).", resp.StatusCode)
+		}
+	}
 
 	rwc, br := clientconn.Hijack()
 	defer rwc.Close()
