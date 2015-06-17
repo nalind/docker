@@ -53,6 +53,7 @@ RUN apt-get update && apt-get install -y \
 	libapparmor-dev \
 	libcap-dev \
 	libltdl-dev \
+	libsasl2-dev \
 	libsqlite3-dev \
 	libsystemd-journal-dev \
 	libtool \
