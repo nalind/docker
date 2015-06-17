@@ -72,6 +72,20 @@ func createAuthenticators(c *Config) []Authenticator {
 
 func (s *Server) httpAuthenticate(w http.ResponseWriter, r *http.Request, options daemon.AuthOptions) (User, error) {
 	err401 := errors.New("wrong login/password")
+	if options.AuthnViaSocket {
+		user := getUserFromHttpResponseWriter(w)
+		if user.Name != "" || user.HaveUid {
+			if user.Name != "" && user.HaveUid {
+				logrus.Infof("kernel identifies client as \"%s\"(UID %d)", user.Name, user.Uid)
+			} else if user.Name != "" {
+				logrus.Infof("kernel identifies client as \"%s\"", user.Name)
+			} else {
+				logrus.Infof("kernel identifies client as UID %d", user.Uid)
+			}
+			context.Set(r, AuthnUser, user)
+			return user, nil
+		}
+	}
 	if len(s.authenticators) == 0 {
 		return User{}, errors.New("authentication of clients is required but not supported")
 	}

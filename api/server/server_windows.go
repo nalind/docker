@@ -12,6 +12,10 @@ import (
 	"github.com/docker/docker/runconfig"
 )
 
+func getUserFromHttpResponseWriter(w http.ResponseWriter) User {
+	return User{}
+}
+
 // NewServer sets up the required Server and does protocol specific checking.
 func (s *Server) newServer(proto, addr string) ([]serverCloser, error) {
 	var (
