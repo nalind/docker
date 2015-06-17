@@ -44,9 +44,11 @@ RUN apt-get update && apt-get install -y \
 	iptables \
 	libapparmor-dev \
 	libcap-dev \
+	libsasl2-dev \
 	libsqlite3-dev \
 	mercurial \
 	parallel \
+	pkg-config \
 	python-mock \
 	python-pip \
 	python-websocket \

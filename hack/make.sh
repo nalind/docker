@@ -104,6 +104,12 @@ fi
 
 if [ -z "$DOCKER_CLIENTONLY" ]; then
 	DOCKER_BUILDTAGS+=" daemon"
+	if \
+		command -v gcc &> /dev/null \
+		&& gcc -E - &> /dev/null <<<'#include <sasl/sasl.h>' \
+	; then
+		DOCKER_BUILDTAGS+=' libsasl2'
+	fi
 fi
 
 if [ "$DOCKER_EXECDRIVER" = 'lxc' ]; then

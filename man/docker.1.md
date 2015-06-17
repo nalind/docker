@@ -122,6 +122,9 @@ unix://[/path/to/socket] to use.
 **-p**, **--pidfile**=""
   Path to use for daemon PID file. Default is `/var/run/docker.pid`
 
+**--realm**="localhost"
+  When built with libsasl2 support, use the specified realm name when offering and accepting Basic authentication to and from clients.  The default is `localhost`.
+
 **--registry-mirror**=<scheme>://<host>
   Prepend a registry mirror to be used for image pulls. May be specified multiple times.
 
