@@ -141,6 +141,7 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 
 		client.SetBasicAuth(cli.getBasic)
 		client.SetBearerAuth(cli.getBearer)
+		client.SetNegotiateAuth(true)
 
 		return nil
 	}

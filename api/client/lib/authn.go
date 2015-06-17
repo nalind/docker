@@ -17,6 +17,7 @@ import (
 type authnOpts struct {
 	getBasic  func(realm string) (string, string, error)
 	getBearer func(challenge string) (string, error)
+	negotiate bool
 }
 
 // SetBasicAuth sets a callback which the client object can use to obtain
@@ -29,6 +30,12 @@ func (cli *Client) SetBasicAuth(get func(challenge string) (string, string, erro
 // credentials if it needs to perform Bearer authentication to the daemon.
 func (cli *Client) SetBearerAuth(get func(challenge string) (string, error)) {
 	cli.authnOpts.getBearer = get
+}
+
+// SetNegotiateAuth controls whether or not the client is allowed to attempt to
+// use Negotiate authentication.
+func (cli *Client) SetNegotiateAuth(enabled bool) {
+	cli.authnOpts.negotiate = enabled
 }
 
 // authResponder is an interface that wraps the scheme,
