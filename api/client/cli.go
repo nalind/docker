@@ -172,6 +172,9 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 		}
 		client.SetLogger(cli)
 		authResponders := []authn.AuthResponder{}
+		if gss := NewGSSAuth(); gss != nil {
+			authResponders = append(authResponders, gss)
+		}
 		authResponders = append(authResponders, authn.NewBearerAuth(cli.GetBearerAuth))
 		authResponders = append(authResponders, authn.NewBasicAuth(cli.GetBasicAuth))
 		if len(authResponders) > 0 {
