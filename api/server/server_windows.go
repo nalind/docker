@@ -8,6 +8,10 @@ import (
 	"net/http"
 )
 
+func getUserFromHTTPResponseWriter(w http.ResponseWriter, options map[string]string) User {
+	return User{}
+}
+
 // NewServer sets up the required Server and does protocol specific checking.
 func (s *Server) newServer(proto, addr string) ([]*HTTPServer, error) {
 	var (
