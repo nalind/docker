@@ -15,6 +15,13 @@ import (
 // authnOpts is the set of authentication-related options which the client
 // should be using.
 type authnOpts struct {
+	getBasic func(realm string) (string, string, error)
+}
+
+// SetBasicAuth sets a callback which the client object can use to obtain
+// credentials if it needs to perform Basic authentication to the daemon.
+func (cli *Client) SetBasicAuth(get func(challenge string) (string, string, error)) {
+	cli.authnOpts.getBasic = get
 }
 
 // authResponder is an interface that wraps the scheme,

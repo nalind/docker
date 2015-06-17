@@ -139,6 +139,8 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 			cli.outFd, cli.isTerminalOut = term.GetFdInfo(cli.out)
 		}
 
+		client.SetBasicAuth(cli.getBasic)
+
 		return nil
 	}
 
