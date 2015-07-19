@@ -167,6 +167,10 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 		} else if !retryWithUpdatedAuthn {
 			err = fmt.Errorf("Unable to authenticate to docker daemon.")
 		} else {
+			// Read and close resp.Body in order to allow connection reuse.
+			ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+
 			serverResp, err = cli.clientRequest(method, path, &body, req.Header)
 			resp.Body = serverResp.body
 			resp.Header = serverResp.header
