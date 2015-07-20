@@ -4,12 +4,14 @@ package server
 
 import (
 	"encoding/base64"
+	"encoding/gob"
 	"net/http"
 	"strings"
 	"unsafe"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon"
+	"github.com/gorilla/sessions"
 )
 
 // #cgo pkg-config: krb5-gssapi
@@ -84,14 +86,16 @@ func (n *negotiator) GetChallenge(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (n *negotiator) CheckResponse(w http.ResponseWriter, r *http.Request) (User, error) {
-	var ctx C.gss_ctx_id_t
+	var ctx, tmpctx C.gss_ctx_id_t
 	var creds C.gss_cred_id_t
-	var itoken, otoken, namebuf C.gss_buffer_desc
-	var minor, lifetime, flags C.OM_uint32
+	var itoken, otoken, namebuf, ictxtoken, octxtoken C.gss_buffer_desc
+	var minor, lifetime, flags, exportable C.OM_uint32
 	var name C.gss_name_t
 	var mech C.gss_OID
 	var client string
 	var reply []byte
+	var session *sessions.Session
+	var open, local C.int
 
 	ah := r.Header["Authorization"]
 	for _, h := range ah {
@@ -118,6 +122,31 @@ func (n *negotiator) CheckResponse(w http.ResponseWriter, r *http.Request) (User
 				logrus.Infof("error setting list of allowed GSSAPI mechanisms (%s), not accepting Negotiate auth", getErrorDesc(major, minor, nil))
 				return User{}, nil
 			}
+			if cookies != nil {
+				session, _ = cookies.Get(r, "docker")
+				if session != nil {
+					// Read a partially-established context.
+					if ctxtoken, ok := session.Values[negotiator{}].([]byte); ok && len(ctxtoken) > 0 {
+						ictxtoken.value = unsafe.Pointer(&ctxtoken[0])
+						ictxtoken.length = C.size_t(len(ctxtoken))
+						major := C.gss_import_sec_context(&minor, &ictxtoken, &tmpctx)
+						if major != C.GSS_S_COMPLETE {
+							logrus.Debug("error importing context token, ignoring")
+						} else {
+							ctx = tmpctx
+						}
+					}
+					// Ignore a fully-established context, since we only get here if the client's still
+					// trying to establish one.
+					if ctx != nil {
+						major = C.gss_inquire_context(&minor, ctx, &name, nil, &lifetime, nil, &flags, &local, &open)
+						if major == C.GSS_S_COMPLETE && open != 0 {
+							logrus.Debug("client provided established GSSAPI context, ignoring it")
+							C.gss_delete_sec_context(&minor, &ctx, nil)
+						}
+					}
+				}
+			}
 			// Actually accept the client's initiator token.
 			itoken.value = unsafe.Pointer(&token[0])
 			itoken.length = C.size_t(len(token))
@@ -126,23 +155,42 @@ func (n *negotiator) CheckResponse(w http.ResponseWriter, r *http.Request) (User
 				reply = C.GoBytes(otoken.value, C.int(otoken.length))
 				C.gss_release_buffer(&minor, &otoken)
 			}
-			// We don't support multi-step authentication yet.
-			if major != C.GSS_S_COMPLETE {
-				logrus.Errorf("error accepting GSSAPI context (%s) in a single pass, failed Negotiate auth", getErrorDesc(major, minor, mech))
+			// Check for failure.
+			if major != C.GSS_S_COMPLETE && major != C.GSS_S_CONTINUE_NEEDED {
+				logrus.Errorf("error accepting GSSAPI context (%s), failed Negotiate auth", getErrorDesc(major, minor, mech))
 				return User{}, nil
+			}
+			if major == C.GSS_S_COMPLETE {
+				logrus.Debug("accepted GSSAPI context")
+				// Convert the GSSAPI name to one that can be displayed.
+				major = C.gss_display_name(&minor, name, &namebuf, &mech)
+				if major != C.GSS_S_COMPLETE {
+					logrus.Errorf("error converting GSSAPI client name to display name (%s), failing Negotiate auth", getErrorDesc(major, minor, mech))
+					return User{}, nil
+				} else {
+					client = string(C.GoBytes(namebuf.value, C.int(namebuf.length)))
+					C.gss_release_buffer(&minor, &namebuf)
+				}
+				exportable = C.GSS_C_TRANS_FLAG
 			} else {
+				logrus.Debug("more GSSAPI data required")
+				exportable = C.GSS_C_PROT_READY_FLAG
+			}
+			// Save the established content in the client's session if we can, else drop it.
+			if ctx != nil && session != nil && flags&exportable != 0 {
+				major := C.gss_export_sec_context(&minor, &ctx, &octxtoken)
+				if major != C.GSS_S_COMPLETE {
+					logrus.Info("error exporting context token")
+					defer C.gss_delete_sec_context(&minor, &ctx, nil)
+				} else {
+					logrus.Debug("exported GSSAPI context token")
+					session.Values[negotiator{}] = C.GoBytes(octxtoken.value, C.int(octxtoken.length))
+				}
+			} else {
+				logrus.Debug("can't export context token")
 				defer C.gss_delete_sec_context(&minor, &ctx, nil)
 			}
-			// Convert the GSSAPI name to one that can be displayed.
-			major = C.gss_display_name(&minor, name, &namebuf, nil)
-			if major != C.GSS_S_COMPLETE {
-				logrus.Errorf("error converting GSSAPI client name to display name (%s), failed Negotiate auth", getErrorDesc(major, minor, mech))
-				return User{}, nil
-			} else {
-				client = string(C.GoBytes(namebuf.value, C.int(namebuf.length)))
-				C.gss_release_buffer(&minor, &namebuf)
-			}
-			// Format our reply, if we have one, for the client.
+			// Format our reply token, if we have one, for the client.
 			if len(reply) > 0 {
 				token := base64.StdEncoding.EncodeToString(reply)
 				logrus.Debugf("gssapi: produced reply token \"%s\"", token)
@@ -180,4 +228,5 @@ func createNegotiate(options daemon.AuthOptions) Authenticator {
 
 func init() {
 	RegisterAuthenticator(createNegotiate)
+	gob.Register(negotiator{})
 }
