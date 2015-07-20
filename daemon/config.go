@@ -47,6 +47,13 @@ type CommonConfig struct {
 	// discovery. This should be a 'host:port' combination on which that daemon instance is
 	// reachable by other hosts.
 	ClusterAdvertise string
+
+	// RequireAuthn controls whether or not the daemon requires clients to
+	// authenticate when making requests.
+	RequireAuthn bool
+	// AuthnOpts is a map of configuration settings to be used by
+	// authenticator implementations and plugins.
+	AuthnOpts map[string]string
 }
 
 // InstallCommonFlags adds command-line options to the top-level flag parser for
@@ -73,4 +80,6 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
 	cmd.StringVar(&config.ClusterAdvertise, []string{"-cluster-advertise"}, "", usageFn("Address or interface name to advertise"))
 	cmd.StringVar(&config.ClusterStore, []string{"-cluster-store"}, "", usageFn("Set the cluster store"))
 	cmd.Var(opts.NewMapOpts(config.ClusterOpts, nil), []string{"-cluster-store-opt"}, usageFn("Set cluster store options"))
+	cmd.BoolVar(&config.RequireAuthn, []string{"a", "-authn"}, false, usageFn("Require clients to authenticate"))
+	cmd.Var(opts.NewMapOpts(config.AuthnOpts, opts.ValidateAuthnOpt), []string{"-authn-opt"}, usageFn("Authentication options to use"))
 }

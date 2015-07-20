@@ -37,14 +37,17 @@ type Config struct {
 	SocketGroup      string
 	TLSConfig        *tls.Config
 	Addrs            []Addr
+	RequireAuthn     bool
+	AuthnOpts        map[string]string
 }
 
 // Server contains instance details for the server
 type Server struct {
-	cfg          *Config
-	servers      []*HTTPServer
-	routers      []router.Router
-	authZPlugins []authorization.Plugin
+	cfg            *Config
+	servers        []*HTTPServer
+	routers        []router.Router
+	authZPlugins   []authorization.Plugin
+	authenticators []Authenticator
 }
 
 // Addr contains string representation of address and its protocol (tcp, unix...).

@@ -80,6 +80,7 @@ func (cli *DockerCli) CmdRun(args ...string) error {
 		ErrConflictRestartPolicyAndAutoRemove = fmt.Errorf("Conflicting options: --restart and --rm")
 		ErrConflictDetachAutoRemove           = fmt.Errorf("Conflicting options: --rm and -d")
 	)
+	cli.InstallCommonFlags(cmd)
 
 	config, hostConfig, cmd, err := runconfig.Parse(cmd, args)
 	// just in case the Parse does not exit

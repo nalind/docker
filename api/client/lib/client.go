@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,6 +32,12 @@ type Client struct {
 	version string
 	// custom http headers configured by users
 	customHTTPHeaders map[string]string
+	// a cookie jar, if we're meant to be using cookies
+	jar *cookiejar.Jar
+	// authResponders provide ways to authenticate to servers
+	authResponders map[string]authResponder
+	// authnOpts are passed-in authentication options
+	authnOpts authnOpts
 }
 
 // NewEnvClient initializes a new API client based on environment variables.
@@ -54,14 +61,14 @@ func NewEnvClient() (*Client, error) {
 		}
 	}
 
-	return NewClient(os.Getenv("DOCKER_HOST"), os.Getenv("DOCKER_API_VERSION"), transport, nil)
+	return NewClient(os.Getenv("DOCKER_HOST"), os.Getenv("DOCKER_API_VERSION"), transport, nil, nil)
 }
 
 // NewClient initializes a new API client for the given host and API version.
 // It won't send any version information if the version number is empty.
 // It uses the transport to create a new http client.
 // It also initializes the custom http headers to add to each request.
-func NewClient(host string, version string, transport *http.Transport, httpHeaders map[string]string) (*Client, error) {
+func NewClient(host string, version string, transport *http.Transport, httpHeaders map[string]string, jar *cookiejar.Jar) (*Client, error) {
 	var (
 		basePath       string
 		tlsConfig      *tls.Config
@@ -93,6 +100,8 @@ func NewClient(host string, version string, transport *http.Transport, httpHeade
 		httpClient:        &http.Client{Transport: transport},
 		version:           version,
 		customHTTPHeaders: httpHeaders,
+		authResponders:    createAuthResponders(),
+		jar:               jar,
 	}, nil
 }
 

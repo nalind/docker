@@ -27,10 +27,11 @@ import (
 // If multiple authZ plugins are specified, the block/allow decision is based on ANDing all plugin results
 // For response manipulation, the response from each plugin is piped between plugins. Plugin execution order
 // is determined according to daemon parameters
-func NewCtx(authZPlugins []Plugin, user, userAuthNMethod, requestMethod, requestURI string) *Ctx {
+func NewCtx(authZPlugins []Plugin, user, uid, userAuthNMethod, requestMethod, requestURI string) *Ctx {
 	return &Ctx{
 		plugins:         authZPlugins,
 		user:            user,
+		uid:             uid,
 		userAuthNMethod: userAuthNMethod,
 		requestMethod:   requestMethod,
 		requestURI:      requestURI,
@@ -40,6 +41,7 @@ func NewCtx(authZPlugins []Plugin, user, userAuthNMethod, requestMethod, request
 // Ctx stores a a single request-response interaction context
 type Ctx struct {
 	user            string
+	uid             string
 	userAuthNMethod string
 	requestMethod   string
 	requestURI      string
@@ -74,6 +76,7 @@ func (ctx *Ctx) AuthZRequest(w http.ResponseWriter, r *http.Request) error {
 
 	ctx.authReq = &Request{
 		User:            ctx.user,
+		UID:             ctx.uid,
 		UserAuthNMethod: ctx.userAuthNMethod,
 		RequestMethod:   ctx.requestMethod,
 		RequestURI:      ctx.requestURI,

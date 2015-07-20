@@ -10,6 +10,8 @@ import (
 )
 
 func setPlatformServerConfig(serverConfig *apiserver.Config, daemonCfg *daemon.Config) *apiserver.Config {
+	serverConfig.RequireAuthn = daemonCfg.RequireAuthn
+	serverConfig.AuthnOpts = daemonCfg.AuthnOpts
 	return serverConfig
 }
 

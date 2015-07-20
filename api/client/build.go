@@ -64,6 +64,7 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 	ulimits := make(map[string]*ulimit.Ulimit)
 	flUlimits := opts.NewUlimitOpt(&ulimits)
 	cmd.Var(flUlimits, []string{"-ulimit"}, "Ulimit options")
+	cli.InstallCommonFlags(cmd)
 
 	cmd.Require(flag.Exact, 1)
 

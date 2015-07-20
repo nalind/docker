@@ -39,6 +39,7 @@ Server:
 func (cli *DockerCli) CmdVersion(args ...string) (err error) {
 	cmd := Cli.Subcmd("version", nil, Cli.DockerCommands["version"].Description, true)
 	tmplStr := cmd.String([]string{"f", "#format", "-format"}, "", "Format the output using the given go template")
+	cli.InstallCommonFlags(cmd)
 	cmd.Require(flag.Exact, 0)
 
 	cmd.ParseFlags(args, true)

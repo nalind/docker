@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"runtime"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/opts"
+	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/docker/pkg/tlsconfig"
 )
@@ -44,6 +46,8 @@ type DockerCli struct {
 	isTerminalOut bool
 	// client is the http client that performs all API operations
 	client apiClient
+	// authnOpts collects authentication options from the command line
+	authnOpts map[string]string
 }
 
 // Initialize calls the init function that will setup the configuration for the client
@@ -73,18 +77,24 @@ func (cli *DockerCli) PsFormat() string {
 	return cli.configFile.PsFormat
 }
 
+// InstallCommonFlags installs command line flags which can control the
+// client's behavior.
+func (cli *DockerCli) InstallCommonFlags(flags *flag.FlagSet) {
+	flags.Var(opts.NewMapOpts(cli.authnOpts, ValidateAuthnOpt), []string{"-authn-opt"}, "Authentication options to use")
+}
+
 // NewDockerCli returns a DockerCli instance with IO output and error streams set by in, out and err.
 // The key file, protocol (i.e. unix) and address are passed in as strings, along with the tls.Config. If the tls.Config
 // is set the client scheme will be set to https.
 // The client will be given a 32-second timeout (see https://github.com/docker/docker/pull/8035).
 func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientFlags) *DockerCli {
 	cli := &DockerCli{
-		in:      in,
-		out:     out,
-		err:     err,
-		keyFile: clientFlags.Common.TrustKey,
+		in:        in,
+		out:       out,
+		err:       err,
+		keyFile:   clientFlags.Common.TrustKey,
+		authnOpts: make(map[string]string),
 	}
-
 	cli.init = func() error {
 		clientFlags.PostParse()
 		configFile, e := cliconfig.Load(cliconfig.ConfigDir())
@@ -109,12 +119,14 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 			verStr = tmpStr
 		}
 
+		jar, _ := cookiejar.New(nil)
+
 		clientTransport, err := newClientTransport(clientFlags.Common.TLSOptions)
 		if err != nil {
 			return err
 		}
 
-		client, err := lib.NewClient(host, verStr, clientTransport, customHeaders)
+		client, err := lib.NewClient(host, verStr, clientTransport, customHeaders, jar)
 		if err != nil {
 			return err
 		}

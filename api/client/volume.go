@@ -29,6 +29,7 @@ func (cli *DockerCli) CmdVolume(args ...string) error {
 
 	description += "\nRun 'docker volume COMMAND --help' for more information on a command"
 	cmd := Cli.Subcmd("volume", []string{"[COMMAND]"}, description, false)
+	cli.InstallCommonFlags(cmd)
 
 	cmd.Require(flag.Exact, 0)
 	err := cmd.ParseFlags(args, true)
@@ -45,6 +46,7 @@ func (cli *DockerCli) CmdVolumeLs(args ...string) error {
 	quiet := cmd.Bool([]string{"q", "-quiet"}, false, "Only display volume names")
 	flFilter := opts.NewListOpts(nil)
 	cmd.Var(&flFilter, []string{"f", "-filter"}, "Provide filter values (i.e. 'dangling=true')")
+	cli.InstallCommonFlags(cmd)
 
 	cmd.Require(flag.Exact, 0)
 	cmd.ParseFlags(args, true)
@@ -86,6 +88,7 @@ func (cli *DockerCli) CmdVolumeLs(args ...string) error {
 func (cli *DockerCli) CmdVolumeInspect(args ...string) error {
 	cmd := Cli.Subcmd("volume inspect", []string{"VOLUME [VOLUME...]"}, "Return low-level information on a volume", true)
 	tmplStr := cmd.String([]string{"f", "-format"}, "", "Format the output using the given go template")
+	cli.InstallCommonFlags(cmd)
 
 	cmd.Require(flag.Min, 1)
 	cmd.ParseFlags(args, true)
@@ -112,6 +115,7 @@ func (cli *DockerCli) CmdVolumeCreate(args ...string) error {
 
 	flDriverOpts := opts.NewMapOpts(nil, nil)
 	cmd.Var(flDriverOpts, []string{"o", "-opt"}, "Set driver specific options")
+	cli.InstallCommonFlags(cmd)
 
 	cmd.Require(flag.Exact, 0)
 	cmd.ParseFlags(args, true)
@@ -136,6 +140,7 @@ func (cli *DockerCli) CmdVolumeCreate(args ...string) error {
 // Usage: docker volume rm VOLUME [VOLUME...]
 func (cli *DockerCli) CmdVolumeRm(args ...string) error {
 	cmd := Cli.Subcmd("volume rm", []string{"VOLUME [VOLUME...]"}, "Remove a volume", true)
+	cli.InstallCommonFlags(cmd)
 	cmd.Require(flag.Min, 1)
 	cmd.ParseFlags(args, true)
 

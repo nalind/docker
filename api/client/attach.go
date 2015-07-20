@@ -18,6 +18,7 @@ func (cli *DockerCli) CmdAttach(args ...string) error {
 	cmd := Cli.Subcmd("attach", []string{"CONTAINER"}, Cli.DockerCommands["attach"].Description, true)
 	noStdin := cmd.Bool([]string{"-no-stdin"}, false, "Do not attach STDIN")
 	proxy := cmd.Bool([]string{"-sig-proxy"}, true, "Proxy all received signals to the process")
+	cli.InstallCommonFlags(cmd)
 
 	cmd.Require(flag.Exact, 1)
 

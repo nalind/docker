@@ -156,6 +156,7 @@ func (cli *DockerCli) CmdCreate(args ...string) error {
 	var (
 		flName = cmd.String([]string{"-name"}, "", "Assign a name to the container")
 	)
+	cli.InstallCommonFlags(cmd)
 
 	config, hostConfig, cmd, err := runconfig.Parse(cmd, args)
 	if err != nil {

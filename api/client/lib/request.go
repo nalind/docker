@@ -69,18 +69,19 @@ func (cli *Client) sendRequest(method, path string, query url.Values, body inter
 	return cli.sendClientRequest(method, path, query, params, headers)
 }
 
-func (cli *Client) sendClientRequest(method, path string, query url.Values, body io.Reader, headers map[string][]string) (*serverResponse, error) {
+func (cli *Client) sendClientRequest(method, path string, query url.Values, in io.Reader, headers map[string][]string) (*serverResponse, error) {
 	serverResp := &serverResponse{
 		body:       nil,
 		statusCode: -1,
 	}
+	body := bytes.Buffer{}
 
 	expectedPayload := (method == "POST" || method == "PUT")
-	if expectedPayload && body == nil {
-		body = bytes.NewReader([]byte{})
+	if in != nil {
+		io.Copy(&body, in)
 	}
 
-	req, err := cli.newRequest(method, path, query, body, headers)
+	req, err := cli.newRequest(method, path, query, bytes.NewReader(body.Bytes()), headers)
 	req.URL.Host = cli.addr
 	req.URL.Scheme = cli.scheme
 
@@ -88,7 +89,7 @@ func (cli *Client) sendClientRequest(method, path string, query url.Values, body
 		req.Header.Set("Content-Type", "text/plain")
 	}
 
-	resp, err := cli.httpClient.Do(req)
+	resp, err := cli.doWithAuthn(cli.httpClient, req, body.Bytes())
 	if resp != nil {
 		serverResp.statusCode = resp.StatusCode
 	}

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"runtime"
@@ -15,6 +16,7 @@ import (
 	"github.com/docker/docker/errors"
 	"github.com/docker/docker/pkg/authorization"
 	"github.com/docker/docker/pkg/version"
+	gctx "github.com/gorilla/context"
 	"golang.org/x/net/context"
 )
 
@@ -55,13 +57,24 @@ func debugRequestMiddleware(handler httputils.APIFunc) httputils.APIFunc {
 
 // authorizationMiddleware perform authorization on the request.
 func (s *Server) authorizationMiddleware(handler httputils.APIFunc) httputils.APIFunc {
+	if len(s.cfg.AuthZPluginNames) == 0 {
+		return handler
+	}
+	s.authZPlugins = authorization.NewPlugins(s.cfg.AuthZPluginNames)
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-		// FIXME: fill when authN gets in
-		// User and UserAuthNMethod are taken from AuthN plugins
-		// Currently tracked in https://github.com/docker/docker/pull/13994
+		// User information is set by authnMiddleware on successful authentication
 		user := ""
+		uid := ""
 		userAuthNMethod := ""
-		authCtx := authorization.NewCtx(s.authZPlugins, user, userAuthNMethod, r.Method, r.RequestURI)
+		authedUser, authed := gctx.Get(r, AuthnUser).(User)
+		if authed {
+			user = authedUser.Name
+			userAuthNMethod = authedUser.Scheme
+			if authedUser.HaveUID {
+				uid = fmt.Sprintf("%d", authedUser.UID)
+			}
+		}
+		authCtx := authorization.NewCtx(s.authZPlugins, user, uid, userAuthNMethod, r.Method, r.RequestURI)
 
 		if err := authCtx.AuthZRequest(w, r); err != nil {
 			logrus.Errorf("AuthZRequest for %s %s returned error: %s", r.Method, r.RequestURI, err)
@@ -143,6 +156,32 @@ func versionMiddleware(handler httputils.APIFunc) httputils.APIFunc {
 	}
 }
 
+// authnMiddleware wraps the handler function in an authentication check if
+// authentication is enabled.  If not, it returns the passed-in handler.
+func (s *Server) authnMiddleware(handler httputils.APIFunc) httputils.APIFunc {
+	if s.cfg.RequireAuthn {
+		s.authenticators = createAuthenticators(s.cfg)
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+			user, err := s.httpAuthenticate(w, r, s.cfg.AuthnOpts)
+			if err != nil {
+				return err
+			}
+			if user.Name == "" && !user.HaveUID {
+				return errors.ErrorCodeMustAuthenticate
+			}
+			if user.Name != "" && user.HaveUID {
+				logrus.Debugf("authentication succeeded for %s(uid=%d)", user.Name, user.UID)
+			} else if user.Name != "" {
+				logrus.Debugf("authentication succeeded for %s", user.Name)
+			} else {
+				logrus.Debugf("authentication succeeded for (uid=%d)", user.UID)
+			}
+			return handler(ctx, w, r, vars)
+		}
+	}
+	return handler
+}
+
 // handleWithGlobalMiddlwares wraps the handler function for a request with
 // the server's global middlewares. The order of the middlewares is backwards,
 // meaning that the first in the list will be evaluated last.
@@ -161,17 +200,14 @@ func (s *Server) handleWithGlobalMiddlewares(handler httputils.APIFunc) httputil
 	middlewares := []middleware{
 		versionMiddleware,
 		s.corsMiddleware,
+		s.authorizationMiddleware,
+		s.authnMiddleware,
 		s.userAgentMiddleware,
 	}
 
 	// Only want this on debug level
 	if s.cfg.Logging && logrus.GetLevel() == logrus.DebugLevel {
 		middlewares = append(middlewares, debugRequestMiddleware)
-	}
-
-	if len(s.cfg.AuthZPluginNames) > 0 {
-		s.authZPlugins = authorization.NewPlugins(s.cfg.AuthZPluginNames)
-		middlewares = append(middlewares, s.authorizationMiddleware)
 	}
 
 	h := handler
