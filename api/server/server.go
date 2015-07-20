@@ -28,15 +28,18 @@ type Config struct {
 	Version                  string
 	SocketGroup              string
 	TLSConfig                *tls.Config
+	RequireAuthn             bool
+	AuthnOpts                map[string]string
 }
 
 // Server contains instance details for the server
 type Server struct {
-	cfg           *Config
-	servers       []*HTTPServer
-	routers       []router.Router
-	authZPlugins  []authorization.Plugin
-	routerSwapper *routerSwapper
+	cfg            *Config
+	servers        []*HTTPServer
+	routers        []router.Router
+	authZPlugins   []authorization.Plugin
+	routerSwapper  *routerSwapper
+	authenticators []Authenticator
 }
 
 // New returns a new instance of the server based on the specified configuration.
