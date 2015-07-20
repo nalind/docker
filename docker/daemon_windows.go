@@ -17,6 +17,8 @@ import (
 var defaultDaemonConfigFile = os.Getenv("programdata") + string(os.PathSeparator) + "docker" + string(os.PathSeparator) + "config" + string(os.PathSeparator) + "daemon.json"
 
 func setPlatformServerConfig(serverConfig *apiserver.Config, daemonCfg *daemon.Config) *apiserver.Config {
+	serverConfig.RequireAuthn = daemonCfg.RequireAuthn
+	serverConfig.AuthnOpts = daemonCfg.AuthnOpts
 	return serverConfig
 }
 

@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"runtime"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/opts"
+	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/engine-api/client"
 	"github.com/docker/go-connections/tlsconfig"
@@ -44,6 +47,10 @@ type DockerCli struct {
 	isTerminalOut bool
 	// client is the http client that performs all API operations
 	client client.APIClient
+	// authnOpts collects authentication options from the command line
+	authnOpts map[string]string
+	// jar is a cookie jar that we'll let the http client ask us for
+	jar http.CookieJar
 }
 
 // Initialize calls the init function that will setup the configuration for the client
@@ -79,18 +86,24 @@ func (cli *DockerCli) ImagesFormat() string {
 	return cli.configFile.ImagesFormat
 }
 
+// InstallCommonFlags installs command line flags which can control the
+// client's behavior.
+func (cli *DockerCli) InstallCommonFlags(flags *flag.FlagSet) {
+	flags.Var(opts.NewMapOpts(cli.authnOpts, ValidateAuthnOpt), []string{"-authn-opt"}, "Authentication options to use")
+}
+
 // NewDockerCli returns a DockerCli instance with IO output and error streams set by in, out and err.
 // The key file, protocol (i.e. unix) and address are passed in as strings, along with the tls.Config. If the tls.Config
 // is set the client scheme will be set to https.
 // The client will be given a 32-second timeout (see https://github.com/docker/docker/pull/8035).
 func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientFlags) *DockerCli {
 	cli := &DockerCli{
-		in:      in,
-		out:     out,
-		err:     err,
-		keyFile: clientFlags.Common.TrustKey,
+		in:        in,
+		out:       out,
+		err:       err,
+		keyFile:   clientFlags.Common.TrustKey,
+		authnOpts: make(map[string]string),
 	}
-
 	cli.init = func() error {
 		clientFlags.PostParse()
 		configFile, e := cliconfig.Load(cliconfig.ConfigDir())
@@ -133,10 +146,36 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 			cli.outFd, cli.isTerminalOut = term.GetFdInfo(cli.out)
 		}
 
+		jar, _ := cookiejar.New(nil)
+		cli.jar = jar
+		client.SetAuth(cli)
+		client.SetLogger(cli)
+
 		return nil
 	}
 
 	return cli
+}
+
+// Debug logs a message at debug level.  This is one of the three functions in
+// the authn.Logger interface which the http client looks for in the object
+// that we pass to its SetLogger() method.
+func (cli *DockerCli) Debug(formatted string) {
+	logrus.Debug(formatted)
+}
+
+// Info logs a message at info level.  This is one of the three functions in
+// the authn.Logger interface which the http client looks for in the object
+// that we pass to its SetLogger() method.
+func (cli *DockerCli) Info(formatted string) {
+	logrus.Info(formatted)
+}
+
+// Error logs a message at error level.  This is one of the three functions in
+// the authn.Logger interface which the http client looks for in the object
+// that we pass to its SetLogger() method.
+func (cli *DockerCli) Error(formatted string) {
+	logrus.Error(formatted)
 }
 
 func getServerHost(hosts []string, tlsOptions *tlsconfig.Options) (host string, err error) {

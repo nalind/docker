@@ -84,6 +84,13 @@ type CommonConfig struct {
 	TLSOptions CommonTLSOptions `json:"tls-opts,omitempty"`
 
 	reloadLock sync.Mutex
+
+	// RequireAuthn controls whether or not the daemon requires clients to
+	// authenticate when making requests.
+	RequireAuthn bool
+	// AuthnOpts is a map of configuration settings to be used by
+	// authenticator implementations and plugins.
+	AuthnOpts map[string]string
 }
 
 // InstallCommonFlags adds command-line options to the top-level flag parser for
@@ -110,6 +117,8 @@ func (config *Config) InstallCommonFlags(cmd *flag.FlagSet, usageFn func(string)
 	cmd.StringVar(&config.ClusterAdvertise, []string{"-cluster-advertise"}, "", usageFn("Address or interface name to advertise"))
 	cmd.StringVar(&config.ClusterStore, []string{"-cluster-store"}, "", usageFn("Set the cluster store"))
 	cmd.Var(opts.NewNamedMapOpts("cluster-store-opts", config.ClusterOpts, nil), []string{"-cluster-store-opt"}, usageFn("Set cluster store options"))
+	cmd.BoolVar(&config.RequireAuthn, []string{"a", "-authn"}, false, usageFn("Require clients to authenticate"))
+	cmd.Var(opts.NewMapOpts(config.AuthnOpts, opts.ValidateAuthnOpt), []string{"-authn-opt"}, usageFn("Authentication options to use"))
 }
 
 func parseClusterAdvertiseSettings(clusterStore, clusterAdvertise string) (string, error) {

@@ -22,6 +22,8 @@ func setPlatformServerConfig(serverConfig *apiserver.Config, daemonCfg *daemon.C
 	serverConfig.SocketGroup = daemonCfg.SocketGroup
 	serverConfig.EnableCors = daemonCfg.EnableCors
 	serverConfig.CorsHeaders = daemonCfg.CorsHeaders
+	serverConfig.RequireAuthn = daemonCfg.RequireAuthn
+	serverConfig.AuthnOpts = daemonCfg.AuthnOpts
 
 	return serverConfig
 }
