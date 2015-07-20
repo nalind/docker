@@ -1,12 +1,15 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/gob"
 	"errors"
 	"net/http"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon"
 	"github.com/gorilla/context"
+	"github.com/gorilla/sessions"
 )
 
 // User represents an authenticated remote user.  We know at least one of the
@@ -70,8 +73,21 @@ func createAuthenticators(c *Config) []Authenticator {
 	return authenticators
 }
 
+// We use cookies to cache successful authentications.
+var cookies *sessions.CookieStore
+
 func (s *Server) httpAuthenticate(w http.ResponseWriter, r *http.Request, options daemon.AuthOptions) (User, error) {
+	var session *sessions.Session
 	err401 := errors.New("wrong login/password")
+	if cookies != nil {
+		session, _ = cookies.Get(r, "docker")
+		if user, ok := session.Values[User{}].(User); ok {
+			if user.Name != "" || user.HaveUid {
+				logrus.Infof("accepted cookie authentication for \"%s\"", user.Name)
+				return user, nil
+			}
+		}
+	}
 	if options.AuthnViaSocket {
 		user := getUserFromHttpResponseWriter(w)
 		if user.Name != "" || user.HaveUid {
@@ -83,6 +99,10 @@ func (s *Server) httpAuthenticate(w http.ResponseWriter, r *http.Request, option
 				logrus.Infof("kernel identifies client as UID %d", user.Uid)
 			}
 			context.Set(r, AuthnUser, user)
+			if session != nil {
+				session.Values[User{}] = user
+				sessions.Save(r, w)
+			}
 			return user, nil
 		}
 	}
@@ -102,6 +122,10 @@ func (s *Server) httpAuthenticate(w http.ResponseWriter, r *http.Request, option
 			}
 			if user.Name != "" || user.HaveUid {
 				context.Set(r, AuthnUser, user)
+				if session != nil {
+					session.Values[User{}] = user
+					sessions.Save(r, w)
+				}
 				return user, nil
 			}
 		}
@@ -112,4 +136,12 @@ func (s *Server) httpAuthenticate(w http.ResponseWriter, r *http.Request, option
 		logrus.Error("authentication failed for request")
 	}
 	return User{}, err401
+}
+
+func init() {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err == nil {
+		cookies = sessions.NewCookieStore(key[:])
+		gob.Register(User{})
+	}
 }
