@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strings"
@@ -56,6 +57,10 @@ type DockerCli struct {
 	isTerminalOut bool
 	// transport holds the client transport instance.
 	transport *http.Transport
+	// jar holds cookies to use when we connect multiple times
+	jar *cookiejar.Jar
+	// authResponders provide ways to authenticate to servers
+	authResponders *map[string]*[]AuthResponder
 }
 
 // Initialize calls the init function that will setup the configuration for the client
@@ -122,6 +127,9 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 
 		protoAddrParts := strings.SplitN(hosts[0], "://", 2)
 		cli.proto, cli.addr = protoAddrParts[0], protoAddrParts[1]
+
+		cli.jar, _ = cookiejar.New(nil)
+		cli.authResponders = createAuthResponders()
 
 		if cli.proto == "tcp" {
 			// error is checked in pkg/parsers already

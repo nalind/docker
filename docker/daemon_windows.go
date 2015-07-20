@@ -10,6 +10,7 @@ import (
 )
 
 func setPlatformServerConfig(serverConfig *apiserver.Config, daemonCfg *daemon.Config) *apiserver.Config {
+	serverConfig.AuthOptions = daemonCfg.AuthOptions
 	return serverConfig
 }
 

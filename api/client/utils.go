@@ -29,8 +29,33 @@ import (
 	"github.com/docker/docker/registry"
 )
 
+// AuthResponder is an interface that wraps the Scheme, AuthRespond, and
+// AuthCompleted methods.
+//
+// At initialization time, an implementation of AuthResponder should register
+// itself by calling RegisterAuthResponder.
+type AuthResponder interface {
+	// Scheme should return the name of the authorization scheme for which
+	// the responder should be called.
+	Scheme() string
+	// AuthRespond, given the authentication header value associated with
+	// the scheme that it implements, can decide if the request should be
+	// retried.  If it returns true, then the request is retransmitted to
+	// the server, presumably because it has added an authentication header
+	// which it believes the server will accept.
+	AuthRespond(cli *DockerCli, challenge string, req *http.Request) (bool, error)
+	// AuthCompleted, given a (possibly empty) WWW-Authenticate header from
+	// a successful response, should decide if the server's reply should be
+	// accepted.
+	AuthCompleted(cli *DockerCli, challenge string, req *http.Request) (bool, error)
+}
+
+// AuthResponderCreator either creates a new AuthResponder, or returns nil
+type AuthResponderCreator func() AuthResponder
+
 var (
-	errConnectionRefused = errors.New("Cannot connect to the Docker daemon. Is 'docker -d' running on this host?")
+	authResponderCreators = []AuthResponderCreator{}
+	errConnectionRefused  = errors.New("Cannot connect to the Docker daemon. Is 'docker -d' running on this host?")
 )
 
 type serverResponse struct {
@@ -39,8 +64,35 @@ type serverResponse struct {
 	statusCode int
 }
 
+// RegisterAuthResponder registers a function which will be called at startup
+// to create an AuthResponder.
+func RegisterAuthResponder(arc AuthResponderCreator) {
+	authResponderCreators = append(authResponderCreators, arc)
+}
+
+// Run through all of the registered responder creators and build a map of
+// lists of responders.
+func createAuthResponders() *map[string]*[]AuthResponder {
+	ars := make(map[string]*[]AuthResponder)
+	for _, arc := range authResponderCreators {
+		responder := arc()
+		if responder != nil {
+			scheme := responder.Scheme()
+			if ars[scheme] != nil {
+				slice := append(*(ars[scheme]), responder)
+				ars[scheme] = &slice
+			} else {
+				ars[scheme] = &[]AuthResponder{responder}
+			}
+		}
+	}
+	return &ars
+}
+
 // HTTPClient creates a new HTTP client with the cli's client transport instance.
 func (cli *DockerCli) HTTPClient() *http.Client {
+	// Don't set the Jar here, since it would duplicate us doing cookie
+	// management elsewhere.
 	return &http.Client{Transport: cli.transport}
 }
 
@@ -54,18 +106,131 @@ func (cli *DockerCli) encodeData(data interface{}) (*bytes.Buffer, error) {
 	return params, nil
 }
 
-func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers map[string][]string) (*serverResponse, error) {
+type Doer interface {
+	Do(req *http.Request) (resp *http.Response, err error)
+}
 
+// Run the Doer's Do() method, setting and saving cookies.  An http.Client
+// would handle this for us if we passed in our cookie jar when we initialized
+// it, but we have to do the work for httputil.ClientConn, so we don't set it
+// for http.Clients to avoid duplicating cookies in requests.
+func (cli *DockerCli) doWithCookies(doer Doer, req *http.Request) (*http.Response, error) {
+	if localhost, ok := os.Hostname(); ok == nil && cli.proto == "unix" {
+		req.URL.Host = localhost
+	} else {
+		req.URL.Host = cli.addr
+	}
+	req.URL.Scheme = cli.scheme
+	if cli.jar != nil {
+		for _, cookie := range cli.jar.Cookies(req.URL) {
+			req.AddCookie(cookie)
+		}
+	}
+	resp, err := doer.Do(req)
+	if cli.jar != nil && resp != nil {
+		if cookies := resp.Cookies(); cookies != nil {
+			cli.jar.SetCookies(req.URL, cookies)
+		}
+	}
+	return resp, err
+}
+
+func (cli *DockerCli) doWithAuth(doer Doer, req *http.Request, body []byte) (*http.Response, error) {
+	resp, err := cli.doWithCookies(doer, req)
+	if req.Header.Get("Authorization") == "" && err == nil && resp.StatusCode == http.StatusUnauthorized {
+		scheme := ""
+		for err == nil && resp.StatusCode == http.StatusUnauthorized {
+			retryWithUpdatedAuthn := false
+			ah := resp.Header[http.CanonicalHeaderKey("WWW-Authenticate")]
+			for _, challenge := range ah {
+				tokens := strings.Split(strings.Replace(challenge, "\t", " ", -1), " ")
+				responders := (*cli.authResponders)[tokens[0]]
+				if responders != nil {
+					for _, responder := range *responders {
+						retryWithUpdatedAuthn, err = responder.AuthRespond(cli, challenge, req)
+						if retryWithUpdatedAuthn {
+							logrus.Debugf("handler for \"%s\" produced data", tokens[0])
+							scheme = tokens[0]
+							break
+						} else {
+							logrus.Debugf("handler for \"%s\" failed to produce data", tokens[0])
+						}
+					}
+				} else {
+					logrus.Debugf("no handler for \"%s\"", tokens[0])
+				}
+				if retryWithUpdatedAuthn {
+					break
+				}
+			}
+			if len(ah) == 0 {
+				err = fmt.Errorf("No authenticators available")
+				break
+			} else if err != nil {
+				err = fmt.Errorf("%v. Unable to authenticate to docker daemon", err)
+				break
+			} else if !retryWithUpdatedAuthn {
+				err = fmt.Errorf("Unable to authenticate to docker daemon")
+				break
+			} else {
+				ioutil.ReadAll(resp.Body)
+				resp.Body.Close()
+				req.Body = ioutil.NopCloser(bytes.NewReader(body))
+				resp, err = cli.doWithCookies(doer, req)
+			}
+		}
+		if err == nil && resp.StatusCode != http.StatusUnauthorized {
+			completed := false
+			tokens := []string{}
+			ah := resp.Header[http.CanonicalHeaderKey("WWW-Authenticate")]
+			for _, challenge := range ah {
+				tokens = strings.Split(strings.Replace(challenge, "\t", " ", -1), " ")
+				if tokens[0] == scheme {
+					break
+				}
+			}
+			if len(tokens) == 0 || tokens[0] == scheme {
+				responders := (*cli.authResponders)[scheme]
+				if responders != nil {
+					for _, responder := range *responders {
+						completed, err = responder.AuthCompleted(cli, strings.Join(tokens, " "), req)
+						if completed {
+							logrus.Debugf("handler for \"%s\" succeeded", scheme)
+							break
+						} else {
+							logrus.Debugf("handler for \"%s\" failed", scheme)
+						}
+					}
+				} else {
+					logrus.Debugf("no handler for \"%s\"", scheme)
+				}
+			} else if len(ah) == 0 {
+				logrus.Debugf("No authentication header in final server response")
+			} else if err != nil {
+				err = fmt.Errorf("%v. Unable to authenticate docker daemon", err)
+			} else if !completed {
+				err = fmt.Errorf("Unable to authenticate docker daemon")
+			}
+		}
+	}
+	return resp, err
+}
+
+func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers map[string][]string) (*serverResponse, error) {
 	serverResp := &serverResponse{
 		body:       nil,
 		statusCode: -1,
 	}
+	var body bytes.Buffer
 
 	expectedPayload := (method == "POST" || method == "PUT")
 	if expectedPayload && in == nil {
 		in = bytes.NewReader([]byte{})
 	}
-	req, err := http.NewRequest(method, fmt.Sprintf("%s/v%s%s", cli.basePath, api.Version, path), in)
+	if in != nil {
+		io.Copy(&body, in)
+	}
+	req, err := http.NewRequest(method, fmt.Sprintf("%s/v%s%s", cli.basePath, api.Version, path), bytes.NewReader(body.Bytes()))
 	if err != nil {
 		return serverResp, err
 	}
@@ -90,7 +255,7 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 		req.Header.Set("Content-Type", "text/plain")
 	}
 
-	resp, err := cli.HTTPClient().Do(req)
+	resp, err := cli.doWithAuth(cli.HTTPClient(), req, body.Bytes())
 	if resp != nil {
 		serverResp.statusCode = resp.StatusCode
 	}

@@ -29,15 +29,17 @@ type Config struct {
 	Version     string
 	SocketGroup string
 	TLSConfig   *tls.Config
+	AuthOptions daemon.AuthOptions
 }
 
 // Server contains instance details for the server
 type Server struct {
-	daemon  *daemon.Daemon
-	cfg     *Config
-	router  *mux.Router
-	start   chan struct{}
-	servers []serverCloser
+	daemon         *daemon.Daemon
+	cfg            *Config
+	router         *mux.Router
+	start          chan struct{}
+	servers        []serverCloser
+	authenticators []Authenticator
 }
 
 // New returns a new instance of the server based on the specified configuration.
@@ -45,6 +47,9 @@ func New(cfg *Config) *Server {
 	srv := &Server{
 		cfg:   cfg,
 		start: make(chan struct{}),
+	}
+	if srv.cfg.AuthOptions.RequireAuthn {
+		srv.authenticators = createAuthenticators(srv.cfg)
 	}
 	r := createRouter(srv)
 	srv.router = r
@@ -248,7 +253,7 @@ func (s *Server) initTCPSocket(addr string) (l net.Listener, err error) {
 	return
 }
 
-func makeHTTPHandler(logging bool, localMethod string, localRoute string, handlerFunc HTTPAPIFunc, corsHeaders string, dockerVersion version.Version) http.HandlerFunc {
+func (s *Server) makeHttpHandler(logging bool, auth daemon.AuthOptions, localMethod string, localRoute string, handlerFunc HTTPAPIFunc, corsHeaders string, dockerVersion version.Version) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// log the request
 		logrus.Debugf("Calling %s %s", localMethod, localRoute)
@@ -288,6 +293,14 @@ func makeHTTPHandler(logging bool, localMethod string, localRoute string, handle
 		}
 
 		w.Header().Set("Server", "Docker/"+dockerversion.VERSION+" ("+runtime.GOOS+")")
+
+		if auth.RequireAuthn {
+			user, err := s.httpAuthenticate(w, r, auth)
+			if user.Name == "" && !user.HaveUid {
+				httpError(w, err)
+				return
+			}
+		}
 
 		if err := handlerFunc(version, w, r, mux.Vars(r)); err != nil {
 			logrus.Errorf("Handler for %s %s returned error: %s", localMethod, localRoute, err)
@@ -381,7 +394,7 @@ func createRouter(s *Server) *mux.Router {
 			localMethod := method
 
 			// build the handler function
-			f := makeHTTPHandler(s.cfg.Logging, localMethod, localRoute, localFct, corsHeaders, version.Version(s.cfg.Version))
+			f := s.makeHttpHandler(s.cfg.Logging, s.cfg.AuthOptions, localMethod, localRoute, localFct, corsHeaders, version.Version(s.cfg.Version))
 
 			// add the new route
 			if localRoute == "" {

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -138,7 +139,7 @@ func (cli *DockerCli) hijack(method, path string, setRawTerminal bool, in io.Rea
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(method, fmt.Sprintf("%s/v%s%s", cli.basePath, api.Version, path), params)
+	req, err := http.NewRequest(method, fmt.Sprintf("%s/v%s%s", cli.basePath, api.Version, path), bytes.NewReader(params.Bytes()))
 	if err != nil {
 		return err
 	}
@@ -175,7 +176,15 @@ func (cli *DockerCli) hijack(method, path string, setRawTerminal bool, in io.Rea
 	defer clientconn.Close()
 
 	// Server hijacks the connection, error 'connection closed' expected
-	clientconn.Do(req)
+	resp, err := cli.doWithAuth(clientconn, req, params.Bytes())
+	if resp.StatusCode != 101 {
+		logrus.Debugf("[hijack] Error %d hijacking", resp.StatusCode)
+		if err != nil {
+			return err
+		} else {
+			return fmt.Errorf("Error hijacking connection to the Docker daemon (expected status 101, got %d)", resp.StatusCode)
+		}
+	}
 
 	rwc, br := clientconn.Hijack()
 	defer rwc.Close()
