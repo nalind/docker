@@ -1,6 +1,7 @@
 package main
 
 import (
+	"debug/elf"
 	"testing"
 
 	"github.com/go-check/check"
@@ -82,5 +83,43 @@ func (s *DockerTrustSuite) SetUpTest(c *check.C) {
 func (s *DockerTrustSuite) TearDownTest(c *check.C) {
 	s.reg.Close()
 	s.not.Close()
+	s.ds.TearDownTest(c)
+}
+
+func init() {
+	check.Suite(&DockerAuthnSuite{
+		ds: &DockerDaemonSuite{
+			ds: &DockerSuite{},
+		},
+		daemonAddr: "localhost:4271",
+	})
+}
+
+type DockerAuthnSuite struct {
+	ds         *DockerDaemonSuite
+	krb5       *Krb5Env
+	daemonAddr string
+}
+
+func (s *DockerAuthnSuite) SetUpSuite(c *check.C) {
+	binary, err := elf.Open(dockerBinary)
+	if err != nil {
+		c.Fatalf("Failed to open dockerBinary %s, err %v", dockerBinary, err)
+	}
+	defer binary.Close()
+
+	if _, err = binary.DynamicSymbols(); err != nil {
+		c.Assert(err, check.ErrorMatches, "no symbol section")
+		c.Skip("Docker binary was linked statically, skipping authentication tests")
+	}
+}
+
+func (s *DockerAuthnSuite) SetUpTest(c *check.C) {
+	s.ds.SetUpTest(c)
+	s.krb5 = NewKrb5Env()
+}
+
+func (s *DockerAuthnSuite) TearDownTest(c *check.C) {
+	s.krb5.Stop(c)
 	s.ds.TearDownTest(c)
 }
