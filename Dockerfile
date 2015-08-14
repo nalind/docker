@@ -35,6 +35,7 @@ RUN echo deb http://llvm.org/apt/trusty/ llvm-toolchain-trusty main > /etc/apt/s
 
 # Packaged dependencies
 RUN apt-get update && apt-get install -y \
+	apache2-utils \
 	apparmor \
 	aufs-tools \
 	automake \
@@ -64,6 +65,7 @@ RUN apt-get update && apt-get install -y \
 	python-mock \
 	python-pip \
 	python-websocket \
+	sasl2-bin \
 	s3cmd=1.1.0* \
 	ubuntu-zfs \
 	xfsprogs \
