@@ -36,6 +36,7 @@ RUN	echo deb http://llvm.org/apt/trusty/ llvm-toolchain-trusty main > /etc/apt/s
 
 # Packaged dependencies
 RUN apt-get update && apt-get install -y \
+	apache2-utils \
 	apparmor \
 	aufs-tools \
 	automake \

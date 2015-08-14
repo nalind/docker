@@ -120,6 +120,7 @@ func init() {
 type DockerAuthnSuite struct {
 	ds         *DockerDaemonSuite
 	krb5       *Krb5Env
+	basic      *BasicEnv
 	daemonAddr string
 }
 
@@ -139,9 +140,11 @@ func (s *DockerAuthnSuite) SetUpSuite(c *check.C) {
 func (s *DockerAuthnSuite) SetUpTest(c *check.C) {
 	s.ds.SetUpTest(c)
 	s.krb5 = NewKrb5Env()
+	s.basic = NewBasicEnv()
 }
 
 func (s *DockerAuthnSuite) TearDownTest(c *check.C) {
+	s.basic.Stop(c)
 	s.krb5.Stop(c)
 	s.ds.TearDownTest(c)
 }
