@@ -9,11 +9,11 @@
 package audit
 
 // #cgo LDFLAGS: -laudit
-// #include "libaudit.h"
-// #include <unistd.h>
+// #include <libaudit.h>
+// #include <stdio.h>
 // #include <stdlib.h>
 // #include <string.h>
-// #include <stdio.h>
+// #include <unistd.h>
 import "C"
 
 import (
@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	AUDIT_VIRT_CONTROL    = 2500
-	AUDIT_VIRT_RESOURCE   = 2501
-	AUDIT_VIRT_MACHINE_ID = 2502
+	AUDIT_VIRT_CONTROL    = int(C.AUDIT_VIRT_CONTROL)
+	AUDIT_VIRT_RESOURCE   = int(C.AUDIT_VIRT_RESOURCE)
+	AUDIT_VIRT_MACHINE_ID = int(C.AUDIT_VIRT_MACHINE_ID)
 )
 
 func AuditValueNeedsEncoding(str string) bool {

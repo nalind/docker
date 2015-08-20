@@ -2,8 +2,9 @@
 
 package server
 
+// #include <sys/types.h>
+// #include <pwd.h>
 // #include <stdlib.h>
-// #include "/usr/include/pwd.h"
 import "C"
 import (
 	"bytes"
