@@ -287,19 +287,19 @@ func (p *v2Puller) pullV2Tag(out io.Writer, tag, taggedName string) (tagUpdated 
 		p.graph.Retain(p.sessionID, img.id)
 		layerIDs = append(layerIDs, img.id)
 
-		p.graph.imageMutex.Lock(img.id)
+		p.graph.imageMutex(img.id).Lock()
 
 		// Check if exists
 		if p.graph.Exists(img.id) {
 			if err := p.validateImageInGraph(img.id, imgs, i); err != nil {
-				p.graph.imageMutex.Unlock(img.id)
+				p.graph.imageMutex(img.id).Unlock()
 				return false, fmt.Errorf("image validation failed: %v", err)
 			}
 			logrus.Debugf("Image already exists: %s", img.id)
-			p.graph.imageMutex.Unlock(img.id)
+			p.graph.imageMutex(img.id).Unlock()
 			continue
 		}
-		p.graph.imageMutex.Unlock(img.id)
+		p.graph.imageMutex(img.id).Unlock()
 
 		out.Write(p.sf.FormatProgress(stringid.TruncateID(img.id), "Pulling fs layer", nil))
 
@@ -362,8 +362,8 @@ func (p *v2Puller) pullV2Tag(out io.Writer, tag, taggedName string) (tagUpdated 
 			p.graph.imagesMutex.Lock()
 			defer p.graph.imagesMutex.Unlock()
 
-			p.graph.imageMutex.Lock(d.img.id)
-			defer p.graph.imageMutex.Unlock(d.img.id)
+			p.graph.imageMutex(d.img.id).Lock()
+			defer p.graph.imageMutex(d.img.id).Unlock()
 
 			// Must recheck the data on disk if any exists.
 			// This protects against races where something
@@ -590,8 +590,8 @@ func (p *v2Puller) attemptIDReuse(imgs []contentAddressableDescriptor) {
 		}
 	}
 	for id := range idMap {
-		p.graph.imageMutex.Lock(id)
-		defer p.graph.imageMutex.Unlock(id)
+		p.graph.imageMutex(id).Lock()
+		defer p.graph.imageMutex(id).Unlock()
 	}
 
 	// continueReuse controls whether the function will try to find
@@ -715,8 +715,8 @@ func (p *v2Puller) tryNextID(imgs []contentAddressableDescriptor, i int, idMap m
 	imgs[i].id = nextID.Hex()
 
 	if _, exists := idMap[imgs[i].id]; !exists {
-		p.graph.imageMutex.Lock(imgs[i].id)
-		defer p.graph.imageMutex.Unlock(imgs[i].id)
+		p.graph.imageMutex(imgs[i].id).Lock()
+		defer p.graph.imageMutex(imgs[i].id).Unlock()
 	}
 
 	if p.graph.Exists(imgs[i].id) {

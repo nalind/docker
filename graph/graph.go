@@ -23,7 +23,6 @@ import (
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/fsync"
 	"github.com/docker/docker/pkg/idtools"
-	"github.com/docker/docker/pkg/locker"
 	"github.com/docker/docker/pkg/progressreader"
 	"github.com/docker/docker/pkg/streamformatter"
 	"github.com/docker/docker/pkg/stringid"
@@ -144,15 +143,14 @@ type Graph struct {
 	root             string
 	idIndex          *truncindex.TruncIndex
 	driver           graphdriver.Driver
-	imagesMutex      sync.Mutex
-	imageMutex       locker.Locker // protect images in driver.
+	imagesMutex      sync.Locker
 	retained         *retainedLayers
 	tarSplitDisabled bool
 	uidMaps          []idtools.IDMap
 	gidMaps          []idtools.IDMap
 
 	// access to parentRefs must be protected with imageMutex locking the image id
-	// on the key of the map (e.g. imageMutex.Lock(img.ID), parentRefs[img.ID]...)
+	// on the key of the map (e.g. imageMutex(img.ID).Lock, parentRefs[img.ID]...)
 	parentRefs map[string]int
 }
 
@@ -194,6 +192,10 @@ func NewGraph(root string, driver graphdriver.Driver, uidMaps, gidMaps []idtools
 	if err != nil {
 		return nil, err
 	}
+	imagesMutex, err := fsync.Get(filepath.Join(abspath, "images.lock"))
+	if err != nil {
+		return nil, err
+	}
 
 	retained := &retainedLayers{layerHolders: make(map[string]map[string]struct{}), l: mutex, path: filepath.Join(abspath, "retained")}
 	retained.Lock()
@@ -201,13 +203,14 @@ func NewGraph(root string, driver graphdriver.Driver, uidMaps, gidMaps []idtools
 	defer retained.Unlock()
 
 	graph := &Graph{
-		root:       abspath,
-		idIndex:    truncindex.NewTruncIndex([]string{}),
-		driver:     driver,
-		retained:   retained,
-		uidMaps:    uidMaps,
-		gidMaps:    gidMaps,
-		parentRefs: make(map[string]int),
+		root:        abspath,
+		idIndex:     truncindex.NewTruncIndex([]string{}),
+		driver:      driver,
+		imagesMutex: imagesMutex,
+		retained:    retained,
+		uidMaps:     uidMaps,
+		gidMaps:     gidMaps,
+		parentRefs:  make(map[string]int),
 	}
 
 	// Windows does not currently support tarsplit functionality.
@@ -240,9 +243,9 @@ func (graph *Graph) restore() error {
 				logrus.Warnf("ignoring image %s, it could not be restored: %v", id, err)
 				continue
 			}
-			graph.imageMutex.Lock(img.Parent)
+			graph.imageMutex(img.Parent).Lock()
 			graph.parentRefs[img.Parent]++
-			graph.imageMutex.Unlock(img.Parent)
+			graph.imageMutex(img.Parent).Unlock()
 			ids = append(ids, id)
 		}
 	}
@@ -325,6 +328,20 @@ func (graph *Graph) Create(layerData io.Reader, containerID, containerImage, com
 	return img, nil
 }
 
+// imageMutex returns a mutex lock which corresponds to a per-ID lock file.
+func (graph *Graph) imageMutex(id string) *fsync.Mutex {
+	lockid := id
+	if id == "" {
+		lockid = "base"
+	}
+	abs := filepath.Join(graph.root, lockid+".lock")
+	m, err := fsync.GetTransient(abs)
+	if err != nil {
+		panic(fmt.Sprintf("error locking image %s (%s): %v", id, abs, err))
+	}
+	return m
+}
+
 // Register imports a pre-existing image into the graph.
 // Returns nil if the image is already registered.
 func (graph *Graph) Register(im image.Descriptor, layerData io.Reader) (err error) {
@@ -340,8 +357,8 @@ func (graph *Graph) Register(im image.Descriptor, layerData io.Reader) (err erro
 
 	// We need this entire operation to be atomic within the engine. Note that
 	// this doesn't mean Register is fully safe yet.
-	graph.imageMutex.Lock(imgID)
-	defer graph.imageMutex.Unlock(imgID)
+	graph.imageMutex(imgID).Lock()
+	defer graph.imageMutex(imgID).Unlock()
 
 	return graph.register(im, layerData)
 }
@@ -405,9 +422,9 @@ func (graph *Graph) register(im image.Descriptor, layerData io.Reader) (err erro
 
 	graph.idIndex.Add(imgID)
 
-	graph.imageMutex.Lock(parent)
+	graph.imageMutex(parent).Lock()
 	graph.parentRefs[parent]++
-	graph.imageMutex.Unlock(parent)
+	graph.imageMutex(parent).Unlock()
 
 	return nil
 }
@@ -423,6 +440,9 @@ func createRootFilesystemInDriver(graph *Graph, id, parent string) error {
 //   The archive is stored on disk and will be automatically deleted as soon as has been read.
 //   If output is not nil, a human-readable progress bar will be written to it.
 func (graph *Graph) tempLayerArchive(id string, sf *streamformatter.StreamFormatter, output io.Writer) (*archive.TempArchive, error) {
+	graph.imageMutex(id).RLock()
+	defer graph.imageMutex(id).RUnlock()
+
 	image, err := graph.Get(id)
 	if err != nil {
 		return nil, err
@@ -486,12 +506,12 @@ func (graph *Graph) Delete(name string) error {
 	// Remove rootfs data from the driver
 	graph.driver.Remove(id)
 
-	graph.imageMutex.Lock(img.Parent)
+	graph.imageMutex(img.Parent).Lock()
 	graph.parentRefs[img.Parent]--
 	if graph.parentRefs[img.Parent] == 0 {
 		delete(graph.parentRefs, img.Parent)
 	}
-	graph.imageMutex.Unlock(img.Parent)
+	graph.imageMutex(img.Parent).Unlock()
 
 	// Remove the trashed image directory
 	return os.RemoveAll(tmp)
@@ -538,9 +558,9 @@ func (graph *Graph) ByParent() map[string][]*image.Image {
 
 // HasChildren returns whether the given image has any child images.
 func (graph *Graph) HasChildren(imgID string) bool {
-	graph.imageMutex.Lock(imgID)
+	graph.imageMutex(imgID).Lock()
 	count := graph.parentRefs[imgID]
-	graph.imageMutex.Unlock(imgID)
+	graph.imageMutex(imgID).Unlock()
 	return count > 0
 }
 
@@ -650,8 +670,8 @@ func (graph *Graph) saveSize(root string, size int64) error {
 
 // setLayerDigestWithLock sets the digest for the image layer to the provided value.
 func (graph *Graph) setLayerDigestWithLock(id string, dgst digest.Digest) error {
-	graph.imageMutex.Lock(id)
-	defer graph.imageMutex.Unlock(id)
+	graph.imageMutex(id).Lock()
+	defer graph.imageMutex(id).Unlock()
 
 	return graph.setLayerDigest(id, dgst)
 }
@@ -665,8 +685,8 @@ func (graph *Graph) setLayerDigest(id string, dgst digest.Digest) error {
 
 // getLayerDigestWithLock gets the digest for the provide image layer id.
 func (graph *Graph) getLayerDigestWithLock(id string) (digest.Digest, error) {
-	graph.imageMutex.Lock(id)
-	defer graph.imageMutex.Unlock(id)
+	graph.imageMutex(id).RLock()
+	defer graph.imageMutex(id).RUnlock()
 
 	return graph.getLayerDigest(id)
 }
@@ -686,6 +706,9 @@ func (graph *Graph) getLayerDigest(id string) (digest.Digest, error) {
 // setV1CompatibilityConfig stores the v1Compatibility JSON data associated
 // with the image in the manifest to the disk
 func (graph *Graph) setV1CompatibilityConfig(id string, data []byte) error {
+	graph.imageMutex(id).Lock()
+	defer graph.imageMutex(id).Unlock()
+
 	root := graph.imageRoot(id)
 	return ioutil.WriteFile(filepath.Join(root, v1CompatibilityFileName), data, 0600)
 }
@@ -693,6 +716,9 @@ func (graph *Graph) setV1CompatibilityConfig(id string, data []byte) error {
 // getV1CompatibilityConfig reads the v1Compatibility JSON data for the image
 // from the disk
 func (graph *Graph) getV1CompatibilityConfig(id string) ([]byte, error) {
+	graph.imageMutex(id).Lock()
+	defer graph.imageMutex(id).Unlock()
+
 	root := graph.imageRoot(id)
 	return ioutil.ReadFile(filepath.Join(root, v1CompatibilityFileName))
 }
@@ -701,8 +727,8 @@ func (graph *Graph) getV1CompatibilityConfig(id string) ([]byte, error) {
 // for the image. If it doesn't it generates and stores it for the image and
 // all of it's parents based on the image config JSON.
 func (graph *Graph) generateV1CompatibilityChain(id string) ([]byte, error) {
-	graph.imageMutex.Lock(id)
-	defer graph.imageMutex.Unlock(id)
+	graph.imageMutex(id).Lock()
+	defer graph.imageMutex(id).Unlock()
 
 	if v1config, err := graph.getV1CompatibilityConfig(id); err == nil {
 		return v1config, nil
