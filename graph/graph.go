@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/archive"
+	"github.com/docker/docker/pkg/fsync"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/locker"
 	"github.com/docker/docker/pkg/progressreader"
@@ -59,23 +60,64 @@ func (img v1Descriptor) MarshalConfig() ([]byte, error) {
 // pulling or building images
 type retainedLayers struct {
 	layerHolders map[string]map[string]struct{} // map[layerID]map[sessionID]
-	sync.Mutex
+	l            sync.Locker
+	path         string
+}
+
+// Lock obtains an exclusive lock on the retained layers map.
+func (r *retainedLayers) Lock() {
+	r.l.Lock()
+}
+
+// Lock releases an exclusive lock on the retained layers map.
+func (r *retainedLayers) Unlock() {
+	r.l.Unlock()
+}
+
+// reload reads the retained layers list from a file on disk.
+func (r *retainedLayers) reload() {
+	r.layerHolders = make(map[string]map[string]struct{})
+	f, err := os.Open(r.path)
+	if err == nil {
+		defer f.Close()
+		dec := json.NewDecoder(f)
+		dec.Decode(&r.layerHolders)
+	} else {
+		if !os.IsNotExist(err) {
+			panic(fmt.Sprintf("error reading retained layers list: %v", err))
+		}
+	}
+}
+
+// save writes the retained layers list to a file on disk.
+func (r *retainedLayers) save() {
+	f, err := os.Create(r.path)
+	if err == nil {
+		defer f.Close()
+		enc := json.NewEncoder(f)
+		enc.Encode(&r.layerHolders)
+	} else {
+		panic(fmt.Sprintf("error saving retained layers list: %v", err))
+	}
 }
 
 func (r *retainedLayers) Add(sessionID string, layerIDs []string) {
 	r.Lock()
 	defer r.Unlock()
+	r.reload()
 	for _, layerID := range layerIDs {
 		if r.layerHolders[layerID] == nil {
 			r.layerHolders[layerID] = map[string]struct{}{}
 		}
 		r.layerHolders[layerID][sessionID] = struct{}{}
 	}
+	r.save()
 }
 
 func (r *retainedLayers) Delete(sessionID string, layerIDs []string) {
 	r.Lock()
 	defer r.Unlock()
+	r.reload()
 	for _, layerID := range layerIDs {
 		holders, ok := r.layerHolders[layerID]
 		if !ok {
@@ -86,10 +128,12 @@ func (r *retainedLayers) Delete(sessionID string, layerIDs []string) {
 			delete(r.layerHolders, layerID) // Delete any empty reference set.
 		}
 	}
+	r.save()
 }
 
 func (r *retainedLayers) Exists(layerID string) bool {
 	r.Lock()
+	r.reload()
 	_, exists := r.layerHolders[layerID]
 	r.Unlock()
 	return exists
@@ -146,11 +190,21 @@ func NewGraph(root string, driver graphdriver.Driver, uidMaps, gidMaps []idtools
 		return nil, err
 	}
 
+	mutex, err := fsync.Get(filepath.Join(abspath, "retained.lock"))
+	if err != nil {
+		return nil, err
+	}
+
+	retained := &retainedLayers{layerHolders: make(map[string]map[string]struct{}), l: mutex, path: filepath.Join(abspath, "retained")}
+	retained.Lock()
+	retained.reload()
+	defer retained.Unlock()
+
 	graph := &Graph{
 		root:       abspath,
 		idIndex:    truncindex.NewTruncIndex([]string{}),
 		driver:     driver,
-		retained:   &retainedLayers{layerHolders: make(map[string]map[string]struct{})},
+		retained:   retained,
 		uidMaps:    uidMaps,
 		gidMaps:    gidMaps,
 		parentRefs: make(map[string]int),
