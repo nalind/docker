@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/docker/docker/pkg/broadcaster"
@@ -15,6 +16,7 @@ func TestPools(t *testing.T) {
 	s := &TagStore{
 		pullingPool: make(map[string]*broadcaster.Buffered),
 		pushingPool: make(map[string]*broadcaster.Buffered),
+		mutex:       new(sync.Mutex),
 	}
 
 	if _, found := s.poolAdd("pull", "test1"); found {

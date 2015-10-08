@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/graph/tags"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/broadcaster"
+	"github.com/docker/docker/pkg/fsync"
 	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/registry"
@@ -36,7 +37,7 @@ type TagStore struct {
 	// Repositories is a map of repositories, indexed by name.
 	Repositories map[string]repository
 	trustKey     libtrust.PrivateKey
-	sync.Mutex
+	mutex        sync.Locker
 	// FIXME: move push/pull-related fields
 	// to a helper type
 	pullingPool     map[string]*broadcaster.Buffered
@@ -68,6 +69,10 @@ func NewTagStore(path string, cfg *TagStoreConfig) (*TagStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	mutex, err := fsync.Get(abspath + ".lock")
+	if err != nil {
+		return nil, err
+	}
 
 	store := &TagStore{
 		path:            abspath,
@@ -78,6 +83,7 @@ func NewTagStore(path string, cfg *TagStoreConfig) (*TagStore, error) {
 		pushingPool:     make(map[string]*broadcaster.Buffered),
 		registryService: cfg.Registry,
 		eventsService:   cfg.Events,
+		mutex:           mutex,
 	}
 	// Load the json file if it exists, otherwise create it.
 	if err := store.reload(); os.IsNotExist(err) {
@@ -88,6 +94,16 @@ func NewTagStore(path string, cfg *TagStoreConfig) (*TagStore, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+// Lock obtains a write lock on the tag store data.
+func (store *TagStore) Lock() {
+	store.mutex.Lock()
+}
+
+// Unlock releases a write lock on the tag store data.
+func (store *TagStore) Unlock() {
+	store.mutex.Unlock()
 }
 
 func (store *TagStore) save() error {
