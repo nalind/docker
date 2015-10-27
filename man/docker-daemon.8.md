@@ -6,7 +6,9 @@ docker-daemon - Enable daemon mode
 
 # SYNOPSIS
 **docker daemon**
+[**-a**|**--authn**[=*false*]]
 [**--api-cors-header**=[=*API-CORS-HEADER*]]
+[**--authn-opt**[=*[]*]]
 [**--authorization-plugin**[=*[]*]]
 [**-b**|**--bridge**[=*BRIDGE*]]
 [**--bip**[=*BIP*]]
@@ -73,8 +75,14 @@ format.
 
 # OPTIONS
 
+**-a**, **--authn**=*true*|*false*
+  Require clients to authenticate to the docker daemon when issuing requests; the historical default is false
+
 **--api-cors-header**=""
   Set CORS headers in the remote API. Default is cors disabled. Give urls like "http://foo, http://bar, ...". Give "*" to allow all.
+
+**--authn-opt**=[]
+  Set authentication options to use when handling authentication of clients.  See AUTHENTICATION OPTIONS.
 
 **--authorization-plugin**=""
   Set authorization plugins to load
@@ -240,6 +248,31 @@ output otherwise.
 
 **--userns-remap**=*default*|*uid:gid*|*user:group*|*user*|*uid*
     Enable user namespaces for containers on the daemon. Specifying "default" will cause a new user and group to be created to handle UID and GID range remapping for the user namespace mappings used for contained processes. Specifying a user (or uid) and optionally a group (or gid) will cause the daemon to lookup the user and group's subordinate ID ranges for use as the user namespace mappings for contained processes.
+
+# AUTHENTICATION OPTIONS
+
+The Docker daemon provides multiple methods for authenticating its clients.
+Authentication is enabled by using the **-a** flag, and particular
+authentication schemes can be enabled and configured with **--authn-opt**
+flags.  When the **-H** option is used to configure a "unix" listening socket,
+enabling the **local-auth** option is strongly recommended.
+
+Here is the list of authentication options:
+
+#### plugins
+
+Call the named plugin or plugins to produce challenges and check client
+responses in order to authenticate clients.
+
+Example use: `docker daemon --authn-opt plugins=sss`
+
+#### realm
+
+When plugins offer HTTP authentication using the `Basic` scheme, they should
+use the specified name as the name of the authentication "realm".  The default
+is `localhost`.
+
+Example use: `docker daemon --authn-opt realm=example.com`
 
 # STORAGE DRIVER OPTIONS
 
