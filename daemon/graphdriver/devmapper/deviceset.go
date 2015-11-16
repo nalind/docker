@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +22,7 @@ import (
 
 	"github.com/docker/docker/daemon/graphdriver"
 	"github.com/docker/docker/pkg/devicemapper"
+	"github.com/docker/docker/pkg/fsync"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/mount"
 	"github.com/docker/docker/pkg/parsers"
@@ -48,6 +48,7 @@ var (
 	enableDeferredDeletion       = false
 )
 
+const deviceSetFile string = "deviceset-data"
 const deviceSetMetaFile string = "deviceset-metadata"
 const transactionMetaFile string = "transaction-metadata"
 
@@ -79,7 +80,7 @@ type devInfo struct {
 	// the global lock while holding the per-device locks all
 	// device locks must be acquired *before* the device lock, and
 	// multiple device locks should be acquired parent before child.
-	lock sync.Mutex
+	lock *fsync.Mutex
 }
 
 type metaData struct {
@@ -89,7 +90,7 @@ type metaData struct {
 // DeviceSet holds information about list of devices
 type DeviceSet struct {
 	metaData      `json:"-"`
-	sync.Mutex    `json:"-"` // Protects all fields of DeviceSet and serializes calls into libdevmapper
+	lock          *fsync.Mutex `json:"-"` // Protects all fields of DeviceSet and serializes calls into libdevmapper
 	root          string
 	devicePrefix  string
 	TransactionID uint64 `json:"-"`
@@ -205,6 +206,38 @@ func (info *devInfo) DevName() string {
 	return getDevName(info.Name())
 }
 
+func (info *devInfo) Lock() {
+	if info.lock == nil {
+		lockfile := info.devices.metadataFile(info) + ".lock"
+		lock, err := fsync.GetTransient(lockfile)
+		if err != nil {
+			panic(fmt.Errorf("Error getting lock for %s: %v", lockfile, err))
+		}
+		info.lock = lock
+	}
+	info.lock.Lock()
+}
+
+func (info *devInfo) Updated() bool {
+	return info.lock.Updated()
+}
+
+func (info *devInfo) Unlock() {
+	info.lock.Unlock()
+}
+
+func (devices *DeviceSet) Lock() {
+	devices.lock.Lock()
+}
+
+func (devices *DeviceSet) Updated() bool {
+	return devices.lock.Updated()
+}
+
+func (devices *DeviceSet) Unlock() {
+	devices.lock.Unlock()
+}
+
 func (devices *DeviceSet) loopbackDir() string {
 	return path.Join(devices.root, "devicemapper")
 }
@@ -227,6 +260,10 @@ func (devices *DeviceSet) transactionMetaFile() string {
 
 func (devices *DeviceSet) deviceSetMetaFile() string {
 	return path.Join(devices.metadataDir(), deviceSetMetaFile)
+}
+
+func (devices *DeviceSet) deviceSetFile() string {
+	return path.Join(devices.metadataDir(), deviceSetFile)
 }
 
 func (devices *DeviceSet) oldMetadataFile() string {
@@ -384,12 +421,11 @@ func (devices *DeviceSet) isDeviceIDFree(deviceID int) bool {
 // Should be called with devices.Lock() held.
 func (devices *DeviceSet) lookupDevice(hash string) (*devInfo, error) {
 	info := devices.Devices[hash]
-	if info == nil {
+	if info == nil || info.Updated() {
 		info = devices.loadMetadata(hash)
 		if info == nil {
 			return nil, fmt.Errorf("Unknown device %s", hash)
 		}
-
 		devices.Devices[hash] = info
 	}
 	return info, nil
@@ -398,6 +434,8 @@ func (devices *DeviceSet) lookupDevice(hash string) (*devInfo, error) {
 func (devices *DeviceSet) lookupDeviceWithLock(hash string) (*devInfo, error) {
 	devices.Lock()
 	defer devices.Unlock()
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
 	info, err := devices.lookupDevice(hash)
 	return info, err
 }
@@ -423,12 +461,22 @@ func (devices *DeviceSet) deviceFileWalkFunction(path string, finfo os.FileInfo)
 		return nil
 	}
 
+	if strings.HasSuffix(finfo.Name(), ".lock") {
+		logrus.Debugf("Skipping file %s", path)
+		return nil
+	}
+
 	if strings.HasPrefix(finfo.Name(), ".") {
 		logrus.Debugf("Skipping file %s", path)
 		return nil
 	}
 
 	if finfo.Name() == deviceSetMetaFile {
+		logrus.Debugf("Skipping file %s", path)
+		return nil
+	}
+
+	if finfo.Name() == deviceSetFile {
 		logrus.Debugf("Skipping file %s", path)
 		return nil
 	}
@@ -646,6 +694,7 @@ func (devices *DeviceSet) migrateOldMetaData() error {
 // loaded in the hash table.
 func (devices *DeviceSet) cleanupDeletedDevices() error {
 	devices.Lock()
+	devices.loadDeviceSetData()
 
 	// If there are no deleted devices, there is nothing to do.
 	if devices.nrDeletedDevices == 0 {
@@ -750,6 +799,8 @@ func (devices *DeviceSet) getNextFreeDeviceID() (int, error) {
 func (devices *DeviceSet) createRegisterDevice(hash string) (*devInfo, error) {
 	devices.Lock()
 	defer devices.Unlock()
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
 
 	deviceID, err := devices.getNextFreeDeviceID()
 	if err != nil {
@@ -900,6 +951,8 @@ func (devices *DeviceSet) getBaseDeviceFS() string {
 func (devices *DeviceSet) verifyBaseDeviceUUIDFS(baseInfo *devInfo) error {
 	devices.Lock()
 	defer devices.Unlock()
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
 
 	if err := devices.activateDeviceIfNeeded(baseInfo, false); err != nil {
 		return err
@@ -936,6 +989,8 @@ func (devices *DeviceSet) verifyBaseDeviceUUIDFS(baseInfo *devInfo) error {
 func (devices *DeviceSet) saveBaseDeviceUUID(baseInfo *devInfo) error {
 	devices.Lock()
 	defer devices.Unlock()
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
 
 	if err := devices.activateDeviceIfNeeded(baseInfo, false); err != nil {
 		return err
@@ -1312,6 +1367,30 @@ func (devices *DeviceSet) saveDeviceSetMetaData() error {
 	return devices.writeMetaFile(jsonData, devices.deviceSetMetaFile())
 }
 
+func (devices *DeviceSet) loadDeviceSetData() error {
+	jsonData, err := ioutil.ReadFile(devices.deviceSetFile())
+	if err != nil {
+		// For backward compatibility return success if file does
+		// not exist.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	devices.Devices = make(map[string]*devInfo)
+	return json.Unmarshal(jsonData, devices.Devices)
+}
+
+func (devices *DeviceSet) saveDeviceSetData() error {
+	jsonData, err := json.Marshal(devices.Devices)
+	if err != nil {
+		return fmt.Errorf("Error encoding data to json: %s", err)
+	}
+
+	return devices.writeMetaFile(jsonData, devices.deviceSetFile())
+}
+
 func (devices *DeviceSet) openTransaction(hash string, DeviceID int) error {
 	devices.allocateTransactionID()
 	devices.DeviceIDHash = hash
@@ -1551,6 +1630,14 @@ func (devices *DeviceSet) initDevmapper(doInit bool) error {
 		return err
 	}
 
+	//create the lock files here, now that the directory they'll live in
+	//exists, before we need them
+	lockfile := path.Join(devices.root, "devicemapper.lock")
+	devices.lock, err = fsync.Get(lockfile)
+	if err != nil {
+		return fmt.Errorf("Error getting lock for %s: %v", lockfile, err)
+	}
+
 	// Set the device prefix from the device id and inode of the docker root dir
 
 	st, err := os.Stat(devices.root)
@@ -1720,11 +1807,14 @@ func (devices *DeviceSet) AddDevice(hash, baseHash string) error {
 		return fmt.Errorf("devmapper: Base device %v has been marked for deferred deletion", baseInfo.Hash)
 	}
 
-	baseInfo.lock.Lock()
-	defer baseInfo.lock.Unlock()
+	baseInfo.Lock()
+	defer baseInfo.Unlock()
 
 	devices.Lock()
 	defer devices.Unlock()
+
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
 
 	// Also include deleted devices in case hash of new device is
 	// same as one of the deleted devices.
@@ -1859,11 +1949,16 @@ func (devices *DeviceSet) DeleteDevice(hash string, syncDelete bool) error {
 		return err
 	}
 
-	info.lock.Lock()
-	defer info.lock.Unlock()
+	info.Lock()
+	defer info.Unlock()
 
 	devices.Lock()
 	defer devices.Unlock()
+
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
+
+	defer devices.saveMetadata(info)
 
 	// If mountcount is not zero, that means devices is still in use
 	// or has not been Put() properly. Fail device deletion.
@@ -1902,6 +1997,8 @@ func (devices *DeviceSet) deactivatePool() error {
 func (devices *DeviceSet) deactivateDevice(info *devInfo) error {
 	logrus.Debugf("[devmapper] deactivateDevice(%s)", info.Hash)
 	defer logrus.Debugf("[devmapper] deactivateDevice END(%s)", info.Hash)
+
+	defer devices.saveMetadata(info)
 
 	devinfo, err := devicemapper.GetInfo(info.Name())
 	if err != nil {
@@ -1958,6 +2055,8 @@ func (devices *DeviceSet) cancelDeferredRemoval(info *devInfo) error {
 
 	logrus.Debugf("[devmapper] cancelDeferredRemoval START(%s)", info.Name())
 	defer logrus.Debugf("[devmapper] cancelDeferredRemoval END(%s)", info.Name())
+
+	defer devices.saveMetadata(info)
 
 	devinfo, err := devicemapper.GetInfoWithDeferred(info.Name())
 
@@ -2020,7 +2119,7 @@ func (devices *DeviceSet) Shutdown() error {
 	devices.Unlock()
 
 	for _, info := range devs {
-		info.lock.Lock()
+		info.Lock()
 		if info.mountCount > 0 {
 			// We use MNT_DETACH here in case it is still busy in some running
 			// container. This means it'll go away from the global scope directly,
@@ -2035,18 +2134,19 @@ func (devices *DeviceSet) Shutdown() error {
 			}
 			devices.Unlock()
 		}
-		info.lock.Unlock()
+		info.Unlock()
 	}
 
 	info, _ := devices.lookupDeviceWithLock("")
 	if info != nil {
-		info.lock.Lock()
+		info.Lock()
 		devices.Lock()
 		if err := devices.deactivateDevice(info); err != nil {
 			logrus.Debugf("Shutdown deactivate base , error: %s", err)
 		}
+		devices.saveDeviceSetData()
 		devices.Unlock()
-		info.lock.Unlock()
+		info.Unlock()
 	}
 
 	devices.Lock()
@@ -2055,6 +2155,7 @@ func (devices *DeviceSet) Shutdown() error {
 			logrus.Debugf("Shutdown deactivate pool , error: %s", err)
 		}
 	}
+	devices.saveDeviceSetData()
 	devices.Unlock()
 
 	return nil
@@ -2071,11 +2172,16 @@ func (devices *DeviceSet) MountDevice(hash, path, mountLabel string) error {
 		return fmt.Errorf("devmapper: Can't mount device %v as it has been marked for deferred deletion", info.Hash)
 	}
 
-	info.lock.Lock()
-	defer info.lock.Unlock()
+	info.Lock()
+	defer info.Unlock()
 
 	devices.Lock()
 	defer devices.Unlock()
+
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
+
+	defer devices.saveMetadata(info)
 
 	if info.mountCount > 0 {
 		if path != info.mountPath {
@@ -2125,11 +2231,16 @@ func (devices *DeviceSet) UnmountDevice(hash string) error {
 		return err
 	}
 
-	info.lock.Lock()
-	defer info.lock.Unlock()
+	info.Lock()
+	defer info.Unlock()
 
 	devices.Lock()
 	defer devices.Unlock()
+
+	devices.loadDeviceSetData()
+	defer devices.saveDeviceSetData()
+
+	defer devices.saveMetadata(info)
 
 	if info.mountCount == 0 {
 		return fmt.Errorf("UnmountDevice: device not-mounted id %s", hash)
@@ -2166,6 +2277,10 @@ func (devices *DeviceSet) List() []string {
 	devices.Lock()
 	defer devices.Unlock()
 
+	if devices.Updated() {
+		devices.loadDeviceSetData()
+	}
+
 	ids := make([]string, len(devices.Devices))
 	i := 0
 	for k := range devices.Devices {
@@ -2194,8 +2309,8 @@ func (devices *DeviceSet) GetDeviceStatus(hash string) (*DevStatus, error) {
 		return nil, err
 	}
 
-	info.lock.Lock()
-	defer info.lock.Unlock()
+	info.Lock()
+	defer info.Unlock()
 
 	devices.Lock()
 	defer devices.Unlock()
@@ -2324,8 +2439,8 @@ func (devices *DeviceSet) exportDeviceMetadata(hash string) (*deviceMetadata, er
 		return nil, err
 	}
 
-	info.lock.Lock()
-	defer info.lock.Unlock()
+	info.Lock()
+	defer info.Unlock()
 
 	metadata := &deviceMetadata{info.DeviceID, info.Size, info.Name()}
 	return metadata, nil
