@@ -414,6 +414,7 @@ func (devices *DeviceSet) constructDeviceIDMap() {
 	}
 }
 
+// Is called with devices.Lock() held.
 func (devices *DeviceSet) deviceFileWalkFunction(path string, finfo os.FileInfo) error {
 
 	// Skip some of the meta files which are not device files.
@@ -453,6 +454,7 @@ func (devices *DeviceSet) deviceFileWalkFunction(path string, finfo os.FileInfo)
 	return nil
 }
 
+// Should be called with devices.Lock() held.
 func (devices *DeviceSet) loadDeviceFilesOnStart() error {
 	logrus.Debugf("[deviceset] loadDeviceFilesOnStart()")
 	defer logrus.Debugf("[deviceset] loadDeviceFilesOnStart() END")
@@ -515,6 +517,7 @@ func (devices *DeviceSet) registerDevice(id int, hash string, size uint64, trans
 	return info, nil
 }
 
+// Should be called with devices.Lock() held.
 func (devices *DeviceSet) activateDeviceIfNeeded(info *devInfo, ignoreDeleted bool) error {
 	logrus.Debugf("activateDeviceIfNeeded(%v)", info.Hash)
 
@@ -525,7 +528,7 @@ func (devices *DeviceSet) activateDeviceIfNeeded(info *devInfo, ignoreDeleted bo
 	// Make sure deferred removal on device is canceled, if one was
 	// scheduled.
 	if err := devices.cancelDeferredRemoval(info); err != nil {
-		return fmt.Errorf("Deivce Deferred Removal Cancellation Failed: %s", err)
+		return fmt.Errorf("Device Deferred Removal Cancellation Failed: %s", err)
 	}
 
 	if devinfo, _ := devicemapper.GetInfo(info.Name()); devinfo != nil && devinfo.Exists != 0 {
@@ -570,7 +573,7 @@ func determineDefaultFS() string {
 		return "xfs"
 	}
 
-	logrus.Warn("XFS is not supported in your system. Either the kernel doesnt support it or mkfs.xfs is not in your PATH. Defaulting to ext4 filesystem")
+	logrus.Warn("XFS is not supported in your system. Either the kernel doesn't support it or mkfs.xfs is not in your PATH. Defaulting to ext4 filesystem")
 	return "ext4"
 }
 
@@ -1746,7 +1749,7 @@ func (devices *DeviceSet) markForDeferredDeletion(info *devInfo) error {
 
 	info.Deleted = true
 
-	// save device metadata to refelect deleted state.
+	// save device metadata to reflect deleted state.
 	if err := devices.saveMetadata(info); err != nil {
 		info.Deleted = false
 		return err
@@ -1756,7 +1759,7 @@ func (devices *DeviceSet) markForDeferredDeletion(info *devInfo) error {
 	return nil
 }
 
-// Should be caled with devices.Lock() held.
+// Should be called with devices.Lock() held.
 func (devices *DeviceSet) deleteTransaction(info *devInfo, syncDelete bool) error {
 	if err := devices.openTransaction(info.Hash, info.DeviceID); err != nil {
 		logrus.Debugf("Error opening transaction hash = %s deviceId = %d", "", info.DeviceID)
@@ -1947,6 +1950,7 @@ func (devices *DeviceSet) removeDevice(devname string) error {
 	return err
 }
 
+// Should be called with devices.Lock() held.
 func (devices *DeviceSet) cancelDeferredRemoval(info *devInfo) error {
 	if !devices.deferredRemove {
 		return nil
