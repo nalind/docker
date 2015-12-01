@@ -172,6 +172,7 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 		}
 		client.SetLogger(cli)
 		authResponders := []authn.AuthResponder{}
+		authResponders = append(authResponders, authn.NewBearerAuth(cli.GetBearerAuth))
 		authResponders = append(authResponders, authn.NewBasicAuth(cli.GetBasicAuth))
 		if len(authResponders) > 0 {
 			client.AuthenticateWith(authResponders...)
