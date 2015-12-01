@@ -17,7 +17,8 @@ import (
 // authentication option.
 func ValidateAuthnOpt(option string) (string, error) {
 	if strings.HasPrefix(option, "basic.username=") ||
-		strings.HasPrefix(option, "interactive=") {
+		strings.HasPrefix(option, "interactive=") ||
+		strings.HasPrefix(option, "bearer.token=") {
 		return option, nil
 	}
 	return "", fmt.Errorf("invalid authentication option %s", option)
@@ -94,4 +95,15 @@ func (cli *DockerCli) getBasic(realm string) (string, string, error) {
 	}
 
 	return username, password, nil
+}
+
+func (cli *DockerCli) getBearer(challenge string) (string, error) {
+	token, ok := cli.authnOpts["bearer.token"]
+	if !ok {
+		token = os.Getenv("DOCKER_BEARER_TOKEN")
+	}
+	if token == "" {
+		return "", errors.New("token required")
+	}
+	return token, nil
 }

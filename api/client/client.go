@@ -70,6 +70,7 @@ type apiClient interface {
 	RegistryLogin(auth types.AuthConfig) (types.AuthResponse, error)
 	ServerVersion() (types.Version, error)
 	SetBasicAuth(func(challenge string) (string, string, error))
+	SetBearerAuth(func(challenge string) (string, error))
 	VolumeCreate(options types.VolumeCreateRequest) (types.Volume, error)
 	VolumeInspect(volumeID string) (types.Volume, error)
 	VolumeList(filter filters.Args) (types.VolumesListResponse, error)
