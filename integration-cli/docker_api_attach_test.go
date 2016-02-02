@@ -14,7 +14,7 @@ import (
 )
 
 func (s *DockerSuite) TestGetContainersAttachWebsocket(c *check.C) {
-	testRequires(c, DaemonIsLinux)
+	testRequires(c, DaemonIsLinux, DaemonNotAuthenticatingWS)
 	out, _ := dockerCmd(c, "run", "-dit", "busybox", "cat")
 
 	rwc, err := sockConn(time.Duration(10 * time.Second))

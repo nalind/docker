@@ -198,7 +198,7 @@ type DockerAuthnSuite struct {
 }
 
 func (s *DockerAuthnSuite) SetUpSuite(c *check.C) {
-	testRequires(c, UnixCli, SameHostDaemon, NeedsGSSAPI, NeedsLibSASL)
+	testRequires(c, UnixCli, SameHostDaemon, NeedsGSSAPI, NeedsLibSASL, DaemonNotAuthenticating)
 	mux := http.NewServeMux()
 	s.server = httptest.NewServer(mux)
 	mux.HandleFunc("/Plugin.Activate", func(w http.ResponseWriter, r *http.Request) {

@@ -31,6 +31,23 @@ if [ "$DOCKER_REMAP_ROOT" ]; then
 	extra_params="--userns-remap $DOCKER_REMAP_ROOT"
 fi
 
+SASLAUTHD=false
+if test -n "$DOCKER_DAEMON_ARGS" ; then
+	for dparam in $DOCKER_DAEMON_ARGS ; do
+		case $dparam in
+			htpasswd=*)
+				HTPASSWD=`echo $dparam | cut -f2 -d=`
+				;;
+			libsasl2=*|libsasl2)
+				SASLAUTHD=true
+				;;
+			keytab=*)
+				KEYTAB=`echo $dparam | cut -f2 -d=`
+				;;
+		esac
+	done
+fi
+
 if [ -z "$DOCKER_TEST_HOST" ]; then
 	# Start apparmor if it is enabled
 	if [ -e "/sys/module/apparmor/parameters/enabled" ] && [ "$(cat /sys/module/apparmor/parameters/enabled)" == "Y" ]; then
@@ -42,6 +59,44 @@ if [ -z "$DOCKER_TEST_HOST" ]; then
 			/etc/init.d/apparmor start
 		)
 	fi
+	if [ -n "$KEYTAB" ] ; then
+		cat > /etc/krb5.conf <<- EOF
+		[libdefaults]
+		 default_realm = EXAMPLE.COM
+		[realms]
+		 EXAMPLE.COM = {
+		  kdc = $HOSTNAME
+		 }
+		EOF
+		(echo;echo)|(set -x;kdb5_util create -s -W)
+		# unix sockets use the container's hostname
+		(set -x;kadmin.local -q "add_principal -randkey HTTP/$HOSTNAME")
+		(set -x;kadmin.local -q "ktadd -k $KEYTAB HTTP/$HOSTNAME")
+		# tcp sockets use "localhost"
+		(set -x;kadmin.local -q "add_principal -randkey HTTP/localhost")
+		(set -x;kadmin.local -q "ktadd -k $KEYTAB HTTP/localhost")
+		(set -x;krb5kdc -P $(cd $DEST && pwd)/krb5kdc.pid)
+		if [ -n "$DOCKER_AUTHN_USERID" ] && [ -n "$DOCKER_AUTHN_PASSWORD" ] ; then
+			(set -x;kadmin.local -q "add_principal -pw $DOCKER_AUTHN_PASSWORD $DOCKER_AUTHN_USERID")
+			echo $DOCKER_AUTHN_PASSWORD | (set -x;kinit $DOCKER_AUTHN_USERID)
+			(set -x;kadmin.local -q "add_principal -pw $DOCKER_AUTHN_PASSWORD unprivileged-$DOCKER_AUTHN_USERID")
+			echo $DOCKER_AUTHN_PASSWORD | (set -x;su -c "kinit unprivileged-$DOCKER_AUTHN_USERID" unprivilegeduser)
+		fi
+	fi
+	if $SASLAUTHD ; then
+		echo pwcheck_method:saslauthd > /usr/lib/sasl2/docker.conf
+		echo saslauthd_path:$(cd $DEST && pwd)/mux >> /usr/lib/sasl2/docker.conf
+		(set -x;saslauthd -c -a pam -m $(cd $DEST && pwd))
+		if [ -n "$DOCKER_AUTHN_USERID" ] && [ -n "$DOCKER_AUTHN_PASSWORD" ] ; then
+			crypt_password=`python -c 'import crypt; print crypt.crypt("'$DOCKER_AUTHN_PASSWORD'", "salt")'`
+			(set -x;useradd -l $DOCKER_AUTHN_USERID -p "$crypt_password")
+		fi
+	fi
+	if [ -n "$HTPASSWD" ] ; then
+		if [ -n "$DOCKER_AUTHN_USERID" ] && [ -n "$DOCKER_AUTHN_PASSWORD" ] ; then
+			(set -x;htpasswd -b -c $HTPASSWD $DOCKER_AUTHN_USERID $DOCKER_AUTHN_PASSWORD)
+		fi
+	fi
 
 	export DOCKER_HOST="unix://$(cd "$DEST" && pwd)/docker.sock" # "pwd" tricks to make sure $DEST is an absolute path, not a relative one
 	( set -x; exec \
@@ -52,6 +107,7 @@ if [ -z "$DOCKER_TEST_HOST" ]; then
 		--userland-proxy="$DOCKER_USERLANDPROXY" \
 		$storage_params \
 		$extra_params \
+		$DOCKER_DAEMON_ARGS \
 			&> "$DEST/docker.log"
 	) &
 	# make sure that if the script exits unexpectedly, we stop this daemon we just started

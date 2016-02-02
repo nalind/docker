@@ -3,13 +3,17 @@
 if [ ! "$(go env GOOS)" = 'windows' ]; then
 	trap - EXIT # reset EXIT trap applied in .integration-daemon-start
 
-	for pidFile in $(find "$DEST" -name docker.pid); do
+	for pidFile in $(find "$DEST" -name docker.pid -o -name saslauthd.pid -o -name krb5kdc.pid); do
 		pid=$(set -x; cat "$pidFile")
 		( set -x; kill "$pid" )
 		if ! wait "$pid"; then
 			echo >&2 "warning: PID $pid from $pidFile had a nonzero exit code"
 		fi
 	done
+
+	if [ -n "$KEYTAB" ] ; then
+		( set -x; kdb5_util destroy -f ; rm -f $KEYTAB )
+	fi
 
 	if [ -z "$DOCKER_TEST_HOST" ]; then
 		# Stop apparmor if it is enabled

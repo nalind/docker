@@ -172,6 +172,32 @@ var (
 		},
 		"Docker daemon is not built with libsasl2 support",
 	}
+	DaemonNotAuthenticating = testRequirement{
+		func() bool {
+			if args := os.Getenv("DOCKER_DAEMON_ARGS"); args != "" {
+				for _, s := range strings.Fields(args) {
+					if s == "-a" {
+						return false
+					}
+				}
+			}
+			return true
+		},
+		"Docker daemon configured for authentication for all tests",
+	}
+	DaemonNotAuthenticatingWS = testRequirement{
+		func() bool {
+			if args := os.Getenv("DOCKER_DAEMON_ARGS"); args != "" {
+				for _, s := range strings.Fields(args) {
+					if s == "-a" {
+						return false
+					}
+				}
+			}
+			return true
+		},
+		"Websockets clients can not authenticate",
+	}
 )
 
 // testRequires checks if the environment satisfies the requirements
