@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y \
 	iptables \
 	jq \
 	krb5-admin-server \
+	krb5-otp \
+	krb5-pkinit \
 	libapparmor-dev \
 	libcap-dev \
 	libkrb5-dev \

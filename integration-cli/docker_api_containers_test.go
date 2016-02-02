@@ -18,10 +18,13 @@ import (
 	"github.com/docker/docker/pkg/integration"
 	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/docker/docker/pkg/stringid"
+	"github.com/docker/engine-api/client/authn"
+	"github.com/docker/engine-api/client/transport"
 	"github.com/docker/engine-api/types"
 	containertypes "github.com/docker/engine-api/types/container"
 	networktypes "github.com/docker/engine-api/types/network"
 	"github.com/go-check/check"
+	"golang.org/x/net/context"
 )
 
 func (s *DockerSuite) TestContainerApiGetAll(c *check.C) {
@@ -1202,7 +1205,12 @@ func (s *DockerSuite) TestContainerApiChunkedEncoding(c *check.C) {
 	// https://golang.org/src/pkg/net/http/request.go?s=11980:12172
 	req.ContentLength = -1
 
-	resp, err := client.Do(req)
+	m := authn.Middleware(testlogger{}, testauther{})
+	do := func(ctx context.Context, client transport.Sender, req *http.Request) (*http.Response, error) {
+		return client.Do(req)
+	}
+	resp, err := m(do)(context.TODO(), client, req)
+
 	c.Assert(err, checker.IsNil, check.Commentf("error starting container with chunked encoding"))
 	resp.Body.Close()
 	c.Assert(resp.StatusCode, checker.Equals, 204)

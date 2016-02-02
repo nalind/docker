@@ -28,11 +28,14 @@ import (
 	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/stringutils"
+	"github.com/docker/engine-api/client/authn"
+	"github.com/docker/engine-api/client/transport"
 	"github.com/docker/engine-api/types"
 	"github.com/docker/go-connections/sockets"
 	"github.com/docker/go-connections/tlsconfig"
 	"github.com/docker/go-units"
 	"github.com/go-check/check"
+	"golang.org/x/net/context"
 )
 
 func init() {
@@ -231,6 +234,9 @@ func (d *Daemon) StartWithLogFile(out *os.File, providedArgs ...string) error {
 	if root := os.Getenv("DOCKER_REMAP_ROOT"); root != "" {
 		args = append(args, []string{"--userns-remap", root}...)
 	}
+	if daemonArgs := os.Getenv("DOCKER_DAEMON_ARGS"); daemonArgs != "" {
+		args = append(args, strings.Split(daemonArgs, ":")...)
+	}
 
 	// If we don't explicitly set the log-level or debug flag(-D) then
 	// turn on debug mode
@@ -302,7 +308,7 @@ func (d *Daemon) StartWithLogFile(out *os.File, providedArgs ...string) error {
 			if err != nil {
 				continue
 			}
-			if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
 				d.c.Logf("[%s] received status != 200 OK: %s", d.id, resp.Status)
 			}
 			d.c.Logf("[%s] daemon started", d.id)
@@ -617,7 +623,11 @@ func sockRequestRaw(method, endpoint string, data io.Reader, ct string) (*http.R
 		return nil, nil, err
 	}
 
-	resp, err := client.Do(req)
+	m := authn.Middleware(testlogger{}, testauther{})
+	do := func(ctx context.Context, client transport.Sender, req *http.Request) (*http.Response, error) {
+		return client.Do(req)
+	}
+	resp, err := m(do)(context.TODO(), client, req)
 	if err != nil {
 		client.Close()
 		return nil, nil, err
@@ -636,7 +646,11 @@ func sockRequestHijack(method, endpoint string, data io.Reader, ct string) (net.
 		return nil, nil, err
 	}
 
-	client.Do(req)
+	m := authn.Middleware(testlogger{}, testauther{})
+	do := func(ctx context.Context, client transport.Sender, req *http.Request) (*http.Response, error) {
+		return client.Do(req)
+	}
+	m(do)(context.TODO(), client, req)
 	conn, br := client.Hijack()
 	return conn, br, nil
 }
@@ -1814,4 +1828,35 @@ func minimalBaseImage() string {
 		return WindowsBaseImage
 	}
 	return "scratch"
+}
+
+type testlogger struct{}
+
+func (l testlogger) Debug(formatted string) {
+	//fmt.Fprintf(os.Stderr, "%s\n", formatted)
+}
+func (l testlogger) Info(formatted string) {
+	fmt.Fprintf(os.Stderr, "%s\n", formatted)
+}
+func (l testlogger) Error(formatted string) {
+	fmt.Fprintf(os.Stderr, "%s\n", formatted)
+}
+
+type testauther struct{}
+
+func (a testauther) GetNegotiateAuth() bool { return true }
+func (a testauther) GetBasicAuth(string) (string, string, error) {
+	userid := os.Getenv("DOCKER_AUTHN_USERID")
+	password := os.Getenv("DOCKER_AUTHN_PASSWORD")
+	if userid == "" || password == "" {
+		return "", "", fmt.Errorf("user name or password not set in environment (%s/%s)", userid, password)
+	}
+	return userid, password, nil
+}
+func init() {
+	l := testlogger{}
+	t := testauther{}
+	var _ authn.BasicAuther = t
+	var _ authn.NegotiateAuther = t
+	var _ authn.Logger = l
 }

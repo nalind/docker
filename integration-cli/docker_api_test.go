@@ -13,7 +13,10 @@ import (
 
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/pkg/integration/checker"
+	"github.com/docker/engine-api/client/authn"
+	"github.com/docker/engine-api/client/transport"
 	"github.com/go-check/check"
+	"golang.org/x/net/context"
 )
 
 func (s *DockerSuite) TestApiOptionsRoute(c *check.C) {
@@ -45,7 +48,12 @@ func (s *DockerSuite) TestApiVersionStatusCode(c *check.C) {
 	c.Assert(err, checker.IsNil)
 	req.Header.Set("User-Agent", "Docker-Client/999.0 (os)")
 
-	res, err := client.Do(req)
+	m := authn.Middleware(testlogger{}, testauther{})
+	do := func(ctx context.Context, client transport.Sender, req *http.Request) (*http.Response, error) {
+		return client.Do(req)
+	}
+	res, err := m(do)(context.TODO(), client, req)
+
 	c.Assert(res.StatusCode, checker.Equals, http.StatusBadRequest)
 }
 
