@@ -20,7 +20,6 @@ import (
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/opts"
-	"github.com/docker/docker/pkg/jsonlog"
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/pidfile"
 	"github.com/docker/docker/pkg/signal"
@@ -168,10 +167,7 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		logrus.Warn("Running experimental build")
 	}
 
-	logrus.SetFormatter(&logrus.TextFormatter{
-		TimestampFormat: jsonlog.RFC3339NanoFixed,
-		DisableColors:   cli.Config.RawLogs,
-	})
+	configureLogging(cli.Config)
 
 	if err := setDefaultUmask(); err != nil {
 		logrus.Fatalf("Failed to set umask: %v", err)
