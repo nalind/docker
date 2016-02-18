@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"fmt"
 	"net/http"
 )
 
@@ -22,7 +21,7 @@ func NewCookieJarMiddleware(jar http.CookieJar) func(next Sender) Sender {
 
 // Do sends a request to the next sender and injects cookies for the given URL.
 func (c *cookieJar) Do(req *http.Request) (*http.Response, error) {
-	fmt.Println(req.URL)
+	//fmt.Println(req.URL)
 	for _, cookie := range c.jar.Cookies(req.URL) {
 		req.AddCookie(cookie)
 	}

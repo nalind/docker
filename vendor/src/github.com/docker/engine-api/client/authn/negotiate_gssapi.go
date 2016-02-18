@@ -25,7 +25,7 @@ import "C"
 
 // negotiate is an AuthResponder that handles authentication with an GSS API.
 type negotiate struct {
-	logger   Logger
+	logger   logger.Logger
 	major    C.OM_uint32
 	ctx      C.gss_ctx_id_t
 	hostname string

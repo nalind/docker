@@ -35,7 +35,7 @@ func (cli *DockerCli) CmdLoad(args ...string) error {
 	if !cli.isTerminalOut {
 		*quiet = true
 	}
-	response, err := cli.client.ImageLoad(context.Background(), input, *quiet)
+	response, err := cli.client.ImageLoad(context.Background(), input)
 	if err != nil {
 		return err
 	}

@@ -13,7 +13,8 @@ import (
 // It's up to the caller to close the io.ReadCloser returned by
 // this function.
 func (cli *Client) ImageLoad(ctx context.Context, input io.Reader) (types.ImageLoadResponse, error) {
-	resp, err := cli.postRaw(ctx, "/images/load", url.Values{}, input, nil)
+	headers := map[string][]string{"Content-Type": {"application/x-tar"}}
+	resp, err := cli.postRaw(ctx, "/images/load", url.Values{}, input, headers)
 	if err != nil {
 		return types.ImageLoadResponse{}, err
 	}

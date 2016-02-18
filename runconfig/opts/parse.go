@@ -410,7 +410,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*container.Config, *container.Host
 		ReadonlyRootfs: *flReadonlyRootfs,
 		LogConfig:      container.LogConfig{Type: *flLoggingDriver, Config: loggingOpts},
 		VolumeDriver:   *flVolumeDriver,
-		Isolation:      container.Isolation(*flIsolation),
+		Isolation:      container.IsolationLevel(*flIsolation),
 		ShmSize:        shmSize,
 		Resources:      resources,
 		Tmpfs:          tmpfs,

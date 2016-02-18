@@ -218,7 +218,7 @@ func (cli *DockerCli) CmdBuild(args ...string) error {
 		Remove:         *rm,
 		ForceRemove:    *forceRm,
 		PullParent:     *pull,
-		Isolation:      container.Isolation(*isolation),
+		IsolationLevel: container.IsolationLevel(*isolation),
 		CPUSetCPUs:     *flCPUSetCpus,
 		CPUSetMems:     *flCPUSetMems,
 		CPUShares:      *flCPUShares,
