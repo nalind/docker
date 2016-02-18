@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"runtime"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/cliconfig"
@@ -15,6 +17,8 @@ import (
 	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/engine-api/client"
+	"github.com/docker/engine-api/client/authn"
+	"github.com/docker/engine-api/client/transport"
 	"github.com/docker/go-connections/sockets"
 	"github.com/docker/go-connections/tlsconfig"
 )
@@ -47,6 +51,8 @@ type DockerCli struct {
 	client client.APIClient
 	// state holds the terminal state
 	state *term.State
+	// authnOpts collects authentication options from the command line
+	authnOpts map[string]string
 }
 
 // Initialize calls the init function that will setup the configuration for the client
@@ -118,7 +124,6 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 		err:     err,
 		keyFile: clientFlags.Common.TrustKey,
 	}
-
 	cli.init = func() error {
 		clientFlags.PostParse()
 		configFile, e := cliconfig.Load(cliconfig.ConfigDir())
@@ -161,10 +166,62 @@ func NewDockerCli(in io.ReadCloser, out, err io.Writer, clientFlags *cli.ClientF
 			cli.outFd, cli.isTerminalOut = term.GetFdInfo(cli.out)
 		}
 
+		cli.authnOpts = clientFlags.Common.AuthnOpts
+		if jar, err := cookiejar.New(nil); err == nil && jar != nil {
+			client.AddMiddlewares(transport.NewCookieJarMiddleware(jar))
+		}
+		client.SetLogger(cli)
+		authResponders := []authn.AuthResponder{}
+		if len(authResponders) > 0 {
+			client.AuthenticateWith(authResponders...)
+		}
+
 		return nil
 	}
 
 	return cli
+}
+
+// Debug logs a message at debug level.  This is one of the functions in the
+// authn.Logger interface which the http client looks for in the object that we
+// pass to its SetLogger() method.
+func (cli *DockerCli) Debug(args ...interface{}) {
+	//logrus.Debug(args...)
+}
+
+// Debug logs a message at debug level.  This is one of the functions in the
+// authn.Logger interface which the http client looks for in the object that we
+// pass to its SetLogger() method.
+func (cli *DockerCli) Debugf(format string, args ...interface{}) {
+	//logrus.Debugf(format, args...)
+}
+
+// Info logs a message at info level.  This is one of the functions in the
+// authn.Logger interface which the http client looks for in the object that we
+// pass to its SetLogger() method.
+func (cli *DockerCli) Info(args ...interface{}) {
+	logrus.Info(args...)
+}
+
+// Info logs a message at info level.  This is one of the functions in the
+// authn.Logger interface which the http client looks for in the object that we
+// pass to its SetLogger() method.
+func (cli *DockerCli) Infof(format string, args ...interface{}) {
+	logrus.Infof(format, args...)
+}
+
+// Error logs a message at error level.  This is one of the functions in the
+// authn.Logger interface which the http client looks for in the object that we
+// pass to its SetLogger() method.
+func (cli *DockerCli) Error(args ...interface{}) {
+	logrus.Error(args...)
+}
+
+// Error logs a message at error level.  This is one of the functions in the
+// authn.Logger interface which the http client looks for in the object that we
+// pass to its SetLogger() method.
+func (cli *DockerCli) Errorf(format string, args ...interface{}) {
+	logrus.Errorf(format, args...)
 }
 
 func getServerHost(hosts []string, tlsOptions *tlsconfig.Options) (host string, err error) {
