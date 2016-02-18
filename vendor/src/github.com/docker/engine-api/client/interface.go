@@ -5,6 +5,9 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/docker/engine-api/client/authn"
+	"github.com/docker/engine-api/client/logger"
+	"github.com/docker/engine-api/client/middleware"
 	"github.com/docker/engine-api/types"
 	"github.com/docker/engine-api/types/container"
 	"github.com/docker/engine-api/types/filters"
@@ -14,6 +17,8 @@ import (
 
 // APIClient is an interface that clients that talk with a docker server must implement.
 type APIClient interface {
+	AddMiddlewares(middlewares ...middleware.Middleware)
+	AuthenticateWith(responders ...authn.AuthResponder)
 	ClientVersion() string
 	ContainerAttach(options types.ContainerAttachOptions) (types.HijackedResponse, error)
 	ContainerCommit(options types.ContainerCommitOptions) (types.ContainerCommitResponse, error)
@@ -52,7 +57,7 @@ type APIClient interface {
 	ImageImport(ctx context.Context, options types.ImageImportOptions) (io.ReadCloser, error)
 	ImageInspectWithRaw(imageID string, getSize bool) (types.ImageInspect, []byte, error)
 	ImageList(options types.ImageListOptions) ([]types.Image, error)
-	ImageLoad(ctx context.Context, input io.Reader, quiet bool) (types.ImageLoadResponse, error)
+	ImageLoad(ctx context.Context, input io.Reader) (types.ImageLoadResponse, error)
 	ImagePull(ctx context.Context, options types.ImagePullOptions, privilegeFunc RequestPrivilegeFunc) (io.ReadCloser, error)
 	ImagePush(ctx context.Context, options types.ImagePushOptions, privilegeFunc RequestPrivilegeFunc) (io.ReadCloser, error)
 	ImageRemove(options types.ImageRemoveOptions) ([]types.ImageDelete, error)
@@ -68,6 +73,7 @@ type APIClient interface {
 	NetworkRemove(networkID string) error
 	RegistryLogin(auth types.AuthConfig) (types.AuthResponse, error)
 	ServerVersion() (types.Version, error)
+	SetLogger(logger logger.Logger)
 	VolumeCreate(options types.VolumeCreateRequest) (types.Volume, error)
 	VolumeInspect(volumeID string) (types.Volume, error)
 	VolumeList(filter filters.Args) (types.VolumesListResponse, error)

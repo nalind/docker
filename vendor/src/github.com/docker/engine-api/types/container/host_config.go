@@ -12,13 +12,13 @@ import (
 // NetworkMode represents the container network stack.
 type NetworkMode string
 
-// Isolation represents the isolation technology of a container. The supported
+// IsolationLevel represents the isolation level of a container. The supported
 // values are platform specific
-type Isolation string
+type IsolationLevel string
 
-// IsDefault indicates the default isolation technology of a container. On Linux this
+// IsDefault indicates the default isolation level of a container. On Linux this
 // is the native driver. On Windows, this is a Windows Server Container.
-func (i Isolation) IsDefault() bool {
+func (i IsolationLevel) IsDefault() bool {
 	return strings.ToLower(string(i)) == "default" || string(i) == ""
 }
 
@@ -233,8 +233,8 @@ type HostConfig struct {
 	ShmSize         int64              // Total shm memory usage
 
 	// Applicable to Windows
-	ConsoleSize [2]int    // Initial console size
-	Isolation   Isolation // Isolation technology of the container (eg default, hyperv)
+	ConsoleSize [2]int         // Initial console size
+	Isolation   IsolationLevel // Isolation level of the container (eg default, hyperv)
 
 	// Contains container's resources (cgroups, ulimits)
 	Resources

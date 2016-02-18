@@ -21,17 +21,17 @@ func (n NetworkMode) IsUserDefined() bool {
 }
 
 // IsHyperV indicates the use of a Hyper-V partition for isolation
-func (i Isolation) IsHyperV() bool {
+func (i IsolationLevel) IsHyperV() bool {
 	return strings.ToLower(string(i)) == "hyperv"
 }
 
 // IsProcess indicates the use of process isolation
-func (i Isolation) IsProcess() bool {
+func (i IsolationLevel) IsProcess() bool {
 	return strings.ToLower(string(i)) == "process"
 }
 
-// IsValid indicates if an isolation technology is valid
-func (i Isolation) IsValid() bool {
+// IsValid indicates is an isolation level is valid
+func (i IsolationLevel) IsValid() bool {
 	return i.IsDefault() || i.IsHyperV() || i.IsProcess()
 }
 
@@ -65,10 +65,10 @@ func ValidateNetMode(c *Config, hc *HostConfig) error {
 	return nil
 }
 
-// ValidateIsolationperforms platform specific validation of the
-// isolation technology in the hostconfig structure. Windows supports 'default' (or
+// ValidateIsolationLevel performs platform specific validation of the
+// isolation level in the hostconfig structure. Windows supports 'default' (or
 // blank), 'process', or 'hyperv'.
-func ValidateIsolation(hc *HostConfig) error {
+func ValidateIsolationLevel(hc *HostConfig) error {
 	// We may not be passed a host config, such as in the case of docker commit
 	if hc == nil {
 		return nil
