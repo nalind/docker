@@ -29,8 +29,10 @@ import (
 	"github.com/docker/docker/daemon"
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/dockerversion"
+	"github.com/docker/docker/errors"
 	"github.com/docker/docker/libcontainerd"
 	"github.com/docker/docker/opts"
+	"github.com/docker/docker/pkg/authentication"
 	"github.com/docker/docker/pkg/authorization"
 	"github.com/docker/docker/pkg/jsonlog"
 	"github.com/docker/docker/pkg/listeners"
@@ -352,6 +354,7 @@ func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfi
 	config.TLS = commonConfig.TLS
 	config.TLSVerify = commonConfig.TLSVerify
 	config.CommonTLSOptions = daemon.CommonTLSOptions{}
+	config.AuthenticationOptions = commonConfig.AuthnOpts
 
 	if commonConfig.TLSOptions != nil {
 		config.CommonTLSOptions.CAFile = commonConfig.TLSOptions.CAFile
@@ -421,4 +424,8 @@ func (cli *DaemonCli) initMiddlewares(s *apiserver.Server, cfg *apiserver.Config
 		handleAuthorization := authorization.NewMiddleware(authZPlugins)
 		s.UseMiddleware(handleAuthorization)
 	}
+
+	makeError := func(err error) error { return errors.NewUnauthorizedError(err) }
+	a := authentication.NewMiddleware(cli.Config.RequireAuthentication, cli.Config.AuthenticationOptions, makeError)
+	s.UseMiddleware(a)
 }

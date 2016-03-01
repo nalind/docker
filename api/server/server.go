@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/tls"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"strings"
@@ -137,6 +139,13 @@ func (s *Server) makeHTTPHandler(handler httputils.APIFunc) http.HandlerFunc {
 		if err := handlerFunc(ctx, w, r, vars); err != nil {
 			logrus.Errorf("Handler for %s %s returned error: %v", r.Method, r.URL.Path, err)
 			httputils.WriteError(w, err)
+			// Work around the client getting a "broken pipe" error
+			// and not reading an error response, which it needs to
+			// be able to read, if we close the connection while
+			// it's trying to upload something that's large.
+			if r.Body != nil {
+				io.Copy(ioutil.Discard, r.Body)
+			}
 		}
 	}
 }

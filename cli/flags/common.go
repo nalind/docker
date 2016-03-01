@@ -57,6 +57,10 @@ func InitCommonFlags() *cli.CommonFlags {
 	cmd.StringVar(&tlsOptions.KeyFile, []string{"-tlskey"}, filepath.Join(dockerCertPath, DefaultKeyFile), "Path to TLS key file")
 
 	cmd.Var(opts.NewNamedListOptsRef("hosts", &commonFlags.Hosts, opts.ValidateHost), []string{"H", "-host"}, "Daemon socket(s) to connect to")
+
+	commonFlags.AuthnOpts = make(map[string]string)
+	cmd.Var(opts.NewMapOpts(commonFlags.AuthnOpts, nil), []string{"-authn-opt"}, "Authentication options to use")
+
 	return commonFlags
 }
 

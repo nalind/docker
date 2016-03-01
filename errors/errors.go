@@ -28,6 +28,12 @@ func NewBadRequestError(err error) error {
 	return NewErrorWithStatusCode(err, http.StatusBadRequest)
 }
 
+// NewUnauthorizedError creates a new API error
+// that has the 401 HTTP status code associated to it.
+func NewUnauthorizedError(err error) error {
+	return NewErrorWithStatusCode(err, http.StatusUnauthorized)
+}
+
 // NewRequestNotFoundError creates a new API error
 // that has the 404 HTTP status code associated to it.
 func NewRequestNotFoundError(err error) error {
