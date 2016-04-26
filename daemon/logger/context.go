@@ -20,6 +20,7 @@ type Context struct {
 	ContainerEnv        []string
 	ContainerLabels     map[string]string
 	LogPath             string
+	GetContainerLeader  func() int
 }
 
 // ExtraAttributes returns the user-defined extra attributes (labels,

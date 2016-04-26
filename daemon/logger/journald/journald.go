@@ -18,6 +18,8 @@ import (
 const name = "journald"
 
 type journald struct {
+	pid     int
+	getpid  func() int
 	vars    map[string]string // additional variables and values to send to the journal along with the log message
 	readers readerList
 }
@@ -65,7 +67,7 @@ func New(ctx logger.Context) (logger.Logger, error) {
 	for k, v := range extraAttrs {
 		vars[k] = v
 	}
-	return &journald{vars: vars, readers: readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)}}, nil
+	return &journald{vars: vars, readers: readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)}, getpid: ctx.GetContainerLeader}, nil
 }
 
 // We don't actually accept any options, but we have to supply a callback for
@@ -84,6 +86,12 @@ func validateLogOpt(cfg map[string]string) error {
 }
 
 func (s *journald) Log(msg *logger.Message) error {
+	if s.pid == 0 && s.getpid != nil {
+		s.pid = s.getpid()
+	}
+	if s.pid != 0 {
+		s.vars["OBJECT_PID"] = fmt.Sprint(s.pid)
+	}
 	if msg.Source == "stderr" {
 		return journal.Send(string(msg.Line), journal.PriErr, s.vars)
 	}

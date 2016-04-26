@@ -317,6 +317,9 @@ func (container *Container) StartLogger(cfg containertypes.LogConfig) (logger.Lo
 			return nil, err
 		}
 	}
+	if container.State != nil {
+		ctx.GetContainerLeader = container.State.GetPID
+	}
 	return c(ctx)
 }
 
