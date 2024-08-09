@@ -12,11 +12,11 @@ import (
 	"github.com/containerd/containerd/images"
 	containerdimages "github.com/containerd/containerd/images"
 	containerdlabels "github.com/containerd/containerd/labels"
-	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/log"
+	"github.com/containerd/platforms"
 	"github.com/distribution/reference"
 	"github.com/docker/docker/api/types/auxprogress"
 	"github.com/docker/docker/api/types/events"
@@ -216,16 +216,7 @@ func (i *ImageService) pushRef(ctx context.Context, targetRef reference.Named, p
 }
 
 func (i *ImageService) getPushDescriptor(ctx context.Context, img containerdimages.Image, platform *ocispec.Platform) (ocispec.Descriptor, error) {
-	// Allow to override the host platform for testing purposes.
-	hostPlatform := i.defaultPlatformOverride
-	if hostPlatform == nil {
-		hostPlatform = platforms.Default()
-	}
-
-	pm := matchAllWithPreference(hostPlatform)
-	if platform != nil {
-		pm = platforms.OnlyStrict(*platform)
-	}
+	pm := i.matchRequestedOrDefault(platforms.OnlyStrict, platform)
 
 	anyMissing := false
 
@@ -295,7 +286,7 @@ func (i *ImageService) getPushDescriptor(ctx context.Context, img containerdimag
 
 			// No specific platform requested and not all manifests are available.
 			// Select the manifest that matches the host platform the best.
-			if bestMatch != nil && hostPlatform.Match(bestMatchPlatform) {
+			if bestMatch != nil && i.hostPlatformMatcher().Match(bestMatchPlatform) {
 				return bestMatch.Target(), nil
 			}
 

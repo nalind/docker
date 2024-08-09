@@ -27,12 +27,10 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/pkg/dialer"
-	"github.com/containerd/containerd/pkg/userns"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/log"
 	"github.com/distribution/reference"
 	dist "github.com/docker/distribution"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/backend"
 	containertypes "github.com/docker/docker/api/types/container"
 	imagetypes "github.com/docker/docker/api/types/image"
@@ -81,6 +79,7 @@ import (
 	resolverconfig "github.com/moby/buildkit/util/resolver/config"
 	"github.com/moby/buildkit/util/tracing"
 	"github.com/moby/locker"
+	"github.com/moby/sys/userns"
 	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -136,12 +135,12 @@ type Daemon struct {
 	seccompProfile     []byte
 	seccompProfilePath string
 
-	usageContainers singleflight.Group[struct{}, []*types.Container]
+	usageContainers singleflight.Group[struct{}, []*containertypes.Summary]
 	usageImages     singleflight.Group[struct{}, []*imagetypes.Summary]
 	usageVolumes    singleflight.Group[struct{}, []*volume.Volume]
 	usageLayer      singleflight.Group[struct{}, int64]
 
-	pruneRunning int32
+	pruneRunning atomic.Bool
 	hosts        map[string]bool // hosts stores the addresses the daemon is listening on
 	startupDone  chan struct{}
 
@@ -858,9 +857,6 @@ func NewDaemon(ctx context.Context, config *config.Config, pluginStore *plugin.S
 		return nil, err
 	}
 	rootIDs := idMapping.RootPair()
-	if err := setMayDetachMounts(); err != nil {
-		log.G(ctx).WithError(err).Warn("Could not set may_detach_mounts kernel parameter")
-	}
 
 	// set up the tmpDir to use a canonical path
 	tmp, err := prepareTempDir(config.Root)

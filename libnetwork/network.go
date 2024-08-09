@@ -187,6 +187,7 @@ type Network struct {
 	ipamV6Config     []*IpamConf
 	ipamV4Info       []*IpamInfo
 	ipamV6Info       []*IpamInfo
+	enableIPv4       bool
 	enableIPv6       bool
 	postIPv6         bool
 	epCnt            *endpointCnt
@@ -368,7 +369,7 @@ func (n *Network) validateConfiguration() error {
 		}
 		if n.ipamType != "" &&
 			n.ipamType != defaultIpamForNetworkType(n.networkType) ||
-			n.enableIPv6 ||
+			n.enableIPv4 || n.enableIPv6 ||
 			len(n.labels) > 0 || len(n.ipamOptions) > 0 ||
 			len(n.ipamV4Config) > 0 || len(n.ipamV6Config) > 0 {
 			return types.ForbiddenErrorf("user specified configurations are not supported if the network depends on a configuration network")
@@ -401,6 +402,7 @@ func (n *Network) validateConfiguration() error {
 
 // applyConfigurationTo applies network specific configurations.
 func (n *Network) applyConfigurationTo(to *Network) error {
+	to.enableIPv4 = n.enableIPv4
 	to.enableIPv6 = n.enableIPv6
 	if len(n.labels) > 0 {
 		to.labels = make(map[string]string, len(n.labels))
@@ -450,6 +452,7 @@ func (n *Network) CopyTo(o datastore.KVObject) error {
 	dstN.scope = n.scope
 	dstN.dynamic = n.dynamic
 	dstN.ipamType = n.ipamType
+	dstN.enableIPv4 = n.enableIPv4
 	dstN.enableIPv6 = n.enableIPv6
 	dstN.persist = n.persist
 	dstN.postIPv6 = n.postIPv6
@@ -539,6 +542,7 @@ func (n *Network) MarshalJSON() ([]byte, error) {
 	netMap["ipamType"] = n.ipamType
 	netMap["ipamOptions"] = n.ipamOptions
 	netMap["addrSpace"] = n.addrSpace
+	netMap["enableIPv4"] = n.enableIPv4
 	netMap["enableIPv6"] = n.enableIPv6
 	if n.generic != nil {
 		netMap["generic"] = n.generic
@@ -601,6 +605,12 @@ func (n *Network) UnmarshalJSON(b []byte) (err error) {
 		}
 	}
 	n.networkType = netMap["networkType"].(string)
+	if v, ok := netMap["enableIPv4"]; ok {
+		n.enableIPv4 = v.(bool)
+	} else {
+		// Set enableIPv4 for IPv4 networks created before the option was added.
+		n.enableIPv4 = len(n.ipamV4Info) > 0
+	}
 	n.enableIPv6 = netMap["enableIPv6"].(bool)
 
 	// if we weren't unmarshaling to netMap we could simply set n.labels
@@ -698,10 +708,6 @@ func (n *Network) UnmarshalJSON(b []byte) (err error) {
 	if v, ok := netMap["loadBalancerMode"]; ok {
 		n.loadBalancerMode = v.(string)
 	}
-	// Reconcile old networks with the recently added `--ipv6` flag
-	if !n.enableIPv6 {
-		n.enableIPv6 = len(n.ipamV6Info) > 0
-	}
 	return nil
 }
 
@@ -716,6 +722,9 @@ func NetworkOptionGeneric(generic map[string]interface{}) NetworkOption {
 	return func(n *Network) {
 		if n.generic == nil {
 			n.generic = make(map[string]interface{})
+		}
+		if val, ok := generic[netlabel.EnableIPv4]; ok {
+			n.enableIPv4 = val.(bool)
 		}
 		if val, ok := generic[netlabel.EnableIPv6]; ok {
 			n.enableIPv6 = val.(bool)
@@ -741,6 +750,17 @@ func NetworkOptionIngress(ingress bool) NetworkOption {
 func NetworkOptionPersist(persist bool) NetworkOption {
 	return func(n *Network) {
 		n.persist = persist
+	}
+}
+
+// NetworkOptionEnableIPv4 returns an option setter to explicitly configure IPv4
+func NetworkOptionEnableIPv4(enableIPv4 bool) NetworkOption {
+	return func(n *Network) {
+		if n.generic == nil {
+			n.generic = make(map[string]interface{})
+		}
+		n.enableIPv4 = enableIPv4
+		n.generic[netlabel.EnableIPv4] = enableIPv4
 	}
 }
 
@@ -1189,7 +1209,7 @@ func (n *Network) createEndpoint(ctx context.Context, name string, options ...En
 		ep.ipamOptions[netlabel.MacAddress] = ep.iface.mac.String()
 	}
 
-	if err = ep.assignAddress(ipam, true, n.enableIPv6 && !n.postIPv6); err != nil {
+	if err = ep.assignAddress(ipam, n.enableIPv4, n.enableIPv6 && !n.postIPv6); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -1488,7 +1508,7 @@ func (n *Network) getController() *Controller {
 	return n.ctrlr
 }
 
-func (n *Network) ipamAllocate() error {
+func (n *Network) ipamAllocate() (retErr error) {
 	if n.hasSpecialDriver() {
 		return nil
 	}
@@ -1504,23 +1524,24 @@ func (n *Network) ipamAllocate() error {
 		}
 	}
 
-	err = n.ipamAllocateVersion(4, ipam)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if err != nil {
-			n.ipamReleaseVersion(4, ipam)
+	if n.enableIPv4 {
+		if err := n.ipamAllocateVersion(4, ipam); err != nil {
+			return err
 		}
-	}()
-
-	if !n.enableIPv6 {
-		return nil
+		defer func() {
+			if retErr != nil {
+				n.ipamReleaseVersion(4, ipam)
+			}
+		}()
 	}
 
-	err = n.ipamAllocateVersion(6, ipam)
-	return err
+	if n.enableIPv6 {
+		if err := n.ipamAllocateVersion(6, ipam); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (n *Network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
@@ -1844,6 +1865,13 @@ func (n *Network) Dynamic() bool {
 	defer n.mu.Unlock()
 
 	return n.dynamic
+}
+
+func (n *Network) IPv4Enabled() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	return n.enableIPv4
 }
 
 func (n *Network) IPv6Enabled() bool {

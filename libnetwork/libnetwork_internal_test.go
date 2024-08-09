@@ -19,6 +19,8 @@ import (
 	"github.com/docker/docker/libnetwork/netutils"
 	"github.com/docker/docker/libnetwork/scope"
 	"github.com/docker/docker/libnetwork/types"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
 	"gotest.tools/v3/skip"
 )
 
@@ -29,6 +31,7 @@ func TestNetworkMarshalling(t *testing.T) {
 		ipamType:    "default",
 		addrSpace:   "viola",
 		networkType: "bridge",
+		enableIPv4:  true,
 		enableIPv6:  true,
 		persist:     true,
 		configOnly:  true,
@@ -138,7 +141,7 @@ func TestNetworkMarshalling(t *testing.T) {
 	}
 
 	if n.name != nn.name || n.id != nn.id || n.networkType != nn.networkType || n.ipamType != nn.ipamType ||
-		n.addrSpace != nn.addrSpace || n.enableIPv6 != nn.enableIPv6 ||
+		n.addrSpace != nn.addrSpace || n.enableIPv4 != nn.enableIPv4 || n.enableIPv6 != nn.enableIPv6 ||
 		n.persist != nn.persist || !compareIpamConfList(n.ipamV4Config, nn.ipamV4Config) ||
 		!compareIpamInfoList(n.ipamV4Info, nn.ipamV4Info) || !compareIpamConfList(n.ipamV6Config, nn.ipamV6Config) ||
 		!compareIpamInfoList(n.ipamV6Info, nn.ipamV6Info) ||
@@ -322,7 +325,12 @@ func TestAuxAddresses(t *testing.T) {
 	}
 	defer c.Stop()
 
-	n := &Network{ipamType: defaultipam.DriverName, networkType: "bridge", ctrlr: c}
+	n := &Network{
+		enableIPv4:  true,
+		ipamType:    defaultipam.DriverName,
+		networkType: "bridge",
+		ctrlr:       c,
+	}
 
 	input := []struct {
 		masterPool   string
@@ -362,7 +370,9 @@ func TestSRVServiceQuery(t *testing.T) {
 	}
 	defer c.Stop()
 
-	n, err := c.NewNetwork("bridge", "net1", "")
+	n, err := c.NewNetwork("bridge", "net1", "",
+		NetworkOptionEnableIPv4(true),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +471,9 @@ func TestServiceVIPReuse(t *testing.T) {
 	}
 	defer c.Stop()
 
-	n, err := c.NewNetwork("bridge", "net1", "", nil)
+	n, err := c.NewNetwork("bridge", "net1", "", nil,
+		NetworkOptionEnableIPv4(true),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,11 +598,13 @@ func TestIpamReleaseOnNetDriverFailures(t *testing.T) {
 	// Test whether ipam state release is invoked  on network create failure from net driver
 	// by checking whether subsequent network creation requesting same gateway IP succeeds
 	ipamOpt := NetworkOptionIpam(defaultipam.DriverName, "", []*IpamConf{{PreferredPool: "10.34.0.0/16", Gateway: "10.34.255.254"}}, nil, nil)
-	if _, err := c.NewNetwork(badDriverName, "badnet1", "", ipamOpt); err == nil {
-		t.Fatalf("bad network driver should have failed network creation")
-	}
+	_, err = c.NewNetwork(badDriverName, "badnet1", "", ipamOpt)
+	assert.Check(t, is.ErrorContains(err, "I will not create any network"))
 
-	gnw, err := c.NewNetwork("bridge", "goodnet1", "", ipamOpt)
+	gnw, err := c.NewNetwork("bridge", "goodnet1", "",
+		NetworkOptionEnableIPv4(true),
+		ipamOpt,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,7 +614,10 @@ func TestIpamReleaseOnNetDriverFailures(t *testing.T) {
 
 	// Now check whether ipam release works on endpoint creation failure
 	bd.failNetworkCreation = false
-	bnw, err := c.NewNetwork(badDriverName, "badnet2", "", ipamOpt)
+	bnw, err := c.NewNetwork(badDriverName, "badnet2", "",
+		NetworkOptionEnableIPv4(true),
+		ipamOpt,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +633,10 @@ func TestIpamReleaseOnNetDriverFailures(t *testing.T) {
 
 	// Now create good bridge network with different gateway
 	ipamOpt2 := NetworkOptionIpam(defaultipam.DriverName, "", []*IpamConf{{PreferredPool: "10.35.0.0/16", Gateway: "10.35.255.253"}}, nil, nil)
-	gnw, err = c.NewNetwork("bridge", "goodnet2", "", ipamOpt2)
+	gnw, err = c.NewNetwork("bridge", "goodnet2", "",
+		NetworkOptionEnableIPv4(true),
+		ipamOpt2,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

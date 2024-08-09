@@ -15,14 +15,6 @@ import (
 	"github.com/vbatts/tar-split/tar/storage"
 )
 
-// FsMagic unsigned id of the filesystem in use.
-type FsMagic uint32
-
-const (
-	// FsMagicUnsupported is a predefined constant value other than a valid filesystem id.
-	FsMagicUnsupported = FsMagic(0x00000000)
-)
-
 // All registered drivers
 var drivers map[string]InitFunc
 
@@ -102,23 +94,6 @@ type Driver interface {
 	DiffDriver
 }
 
-// Capabilities defines a list of capabilities a driver may implement.
-// These capabilities are not required; however, they do determine how a
-// graphdriver can be used.
-type Capabilities struct {
-	// Flags that this driver is capable of reproducing exactly equivalent
-	// diffs for read-only layers. If set, clients can rely on the driver
-	// for consistent tar streams, and avoid extra processing to account
-	// for potential differences (eg: the layer store's use of tar-split).
-	ReproducesExactDiffs bool
-}
-
-// CapabilityDriver is the interface for layered file system drivers that
-// can report on their Capabilities.
-type CapabilityDriver interface {
-	Capabilities() Capabilities
-}
-
 // DiffGetterDriver is the interface for layered file system drivers that
 // provide a specialized function for getting file contents for tar-split.
 type DiffGetterDriver interface {
@@ -134,12 +109,6 @@ type FileGetCloser interface {
 	storage.FileGetter
 	// Close cleans up any resources associated with the FileGetCloser.
 	Close() error
-}
-
-// Checker makes checks on specified filesystems.
-type Checker interface {
-	// IsMounted returns true if the provided path is mounted for the specific checker
-	IsMounted(path string) bool
 }
 
 func init() {

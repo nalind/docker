@@ -35,6 +35,7 @@ import (
 	systemrouter "github.com/docker/docker/api/server/router/system"
 	"github.com/docker/docker/api/server/router/volume"
 	buildkit "github.com/docker/docker/builder/builder-next"
+	"github.com/docker/docker/builder/builder-next/exporter"
 	"github.com/docker/docker/builder/dockerfile"
 	"github.com/docker/docker/cmd/dockerd/debug"
 	"github.com/docker/docker/cmd/dockerd/trap"
@@ -430,24 +431,27 @@ func newRouterOptions(ctx context.Context, config *config.Config, d *daemon.Daem
 	cgroupParent := newCgroupParent(config)
 
 	bk, err := buildkit.New(ctx, buildkit.Opt{
-		SessionManager:        sm,
-		Root:                  filepath.Join(config.Root, "buildkit"),
-		EngineID:              d.ID(),
-		Dist:                  d.DistributionServices(),
-		ImageTagger:           d.ImageService(),
-		NetworkController:     d.NetworkController(),
-		DefaultCgroupParent:   cgroupParent,
-		RegistryHosts:         d.RegistryHosts,
-		BuilderConfig:         config.Builder,
-		Rootless:              daemon.Rootless(config),
-		IdentityMapping:       d.IdentityMapping(),
-		DNSConfig:             config.DNSConfig,
-		ApparmorProfile:       daemon.DefaultApparmorProfile(),
-		UseSnapshotter:        d.UsesSnapshotter(),
-		Snapshotter:           d.ImageService().StorageDriver(),
-		ContainerdAddress:     config.ContainerdAddr,
-		ContainerdNamespace:   config.ContainerdNamespace,
-		ImageExportedCallback: d.ImageExportedByBuildkit,
+		SessionManager:      sm,
+		Root:                filepath.Join(config.Root, "buildkit"),
+		EngineID:            d.ID(),
+		Dist:                d.DistributionServices(),
+		ImageTagger:         d.ImageService(),
+		NetworkController:   d.NetworkController(),
+		DefaultCgroupParent: cgroupParent,
+		RegistryHosts:       d.RegistryHosts,
+		BuilderConfig:       config.Builder,
+		Rootless:            daemon.Rootless(config),
+		IdentityMapping:     d.IdentityMapping(),
+		DNSConfig:           config.DNSConfig,
+		ApparmorProfile:     daemon.DefaultApparmorProfile(),
+		UseSnapshotter:      d.UsesSnapshotter(),
+		Snapshotter:         d.ImageService().StorageDriver(),
+		ContainerdAddress:   config.ContainerdAddr,
+		ContainerdNamespace: config.ContainerdNamespace,
+		Callbacks: exporter.BuildkitCallbacks{
+			Exported: d.ImageExportedByBuildkit,
+			Named:    d.ImageNamedByBuildkit,
+		},
 	})
 	if err != nil {
 		return routerOptions{}, err
@@ -731,7 +735,7 @@ func (opts routerOptions) Build() []router.Router {
 	return routers
 }
 
-func initMiddlewares(ctx context.Context, s *apiserver.Server, cfg *config.Config, pluginStore plugingetter.PluginGetter) (*authorization.Middleware, error) {
+func initMiddlewares(_ context.Context, s *apiserver.Server, cfg *config.Config, pluginStore plugingetter.PluginGetter) (*authorization.Middleware, error) {
 	exp := middleware.NewExperimentalMiddleware(cfg.Experimental)
 	s.UseMiddleware(exp)
 
@@ -740,12 +744,6 @@ func initMiddlewares(ctx context.Context, s *apiserver.Server, cfg *config.Confi
 		return nil, err
 	}
 	s.UseMiddleware(*vm)
-
-	if cfg.CorsHeaders != "" && os.Getenv("DOCKERD_DEPRECATED_CORS_HEADER") != "" {
-		log.G(ctx).Warn(`DEPRECATED: The "api-cors-header" config parameter and the dockerd "--api-cors-header" option will be removed in the next release. Use a reverse proxy if you need CORS headers.`)
-		c := middleware.NewCORSMiddleware(cfg.CorsHeaders) //nolint:staticcheck // ignore SA1019 (NewCORSMiddleware is deprecated); will be removed in the next release.
-		s.UseMiddleware(c)
-	}
 
 	authzMiddleware := authorization.NewMiddleware(cfg.AuthorizationPlugins, pluginStore)
 	s.UseMiddleware(authzMiddleware)
